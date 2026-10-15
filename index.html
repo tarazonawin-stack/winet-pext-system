@@ -1002,7 +1002,7 @@
             } else {
                 section.classList.add('hidden');
                 btn.innerHTML = `<i data-lucide="map-pin" class="w-3.5 h-3.5"></i> + Añadir Reporte GIS Catastro`;
-                btn.className = "w-full py-1.5 bg-slate-100 dark:bg-[#122b1c] text-slate-700 dark:text-winet-400 rounded-xl font-bold text-[11px] flex items-center justify-center gap-1 border border-dashed border-slate-300";
+                btn.className = "w-full py-1.5 bg-slate-100 dark:bg-[#122b1c] text-slate-700 dark:text-winet-400 rounded-xl font-bold text-[11px] flex items-center justify-center gap-1 border border-dashed border-rose-300";
             }
             lucide.createIcons();
         }
@@ -1394,7 +1394,7 @@
             if(tickets.length === 0) return showToast('No hay datos', 'error');
             const headers = ['ID Ticket', 'Fecha Solicitud', 'Estado', 'Clientes', 'Nodo', 'Distrito', 'Supervisor', 'Contratista'];
             const rows = tickets.map(t => [t.id, t.requestDate || '', t.status, t.affectedClients, t.nodo, t.distrito, t.supervisor || '', t.contractor || '']);
-            const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows.map(e => e.map(String).map(s=>`"${s.regexReplace ? s : s.replace(/"/g, '""')}"`).join(','))].join('\n');
+            const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows.map(e => e.map(String).map(s=>`"${s.replace(/"/g, '""')}"`).join(','))].join('\n');
             const link = document.createElement("a");
             link.setAttribute("href", encodeURI(csvContent));
             link.setAttribute("download", `WINET_PEXT_CLOUD_${new Date().toISOString().split('T')[0]}.csv`);
