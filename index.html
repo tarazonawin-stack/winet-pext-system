@@ -887,8 +887,7 @@
                                         <span class="bg-slate-200 dark:bg-[#122b1c] text-[10px] px-2 py-0.5 rounded-full font-bold">\${supTickets.length}</span>
                                     </div>
                                     <div class="flex-1 overflow-y-auto p-3 space-y-2.5">
-                                        \${supTickets.map(t => renderQueueCard(t, supervisors)).join('') || `<div class="text-center text-[11px] text-slate-400 py-6 border border-dashed border-slate-200 dark:border-[#122b1c] rounded-xl">Sin tickets</div>`}
-                                    </div>
+                                        ${supTickets.map(t => renderQueueCard(t, supervisors)).join('') || '<div class="text-center text-[11px] text-slate-400 py-6 border border-dashed border-slate-200 dark:border-[#122b1c] rounded-xl">Sin tickets</div>'}
                                 </div>
                             `;
                         }).join('')}
