@@ -1,0 +1,2173 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WINET • Sistema PEXT de Averías</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        winet: {
+                            50: '#f0fdf4',
+                            100: '#dcfce7',
+                            500: '#22c55e',
+                            600: '#16a34a',
+                            700: '#15803d',
+                            800: '#166534',
+                            900: '#14532d',
+                            950: '#052e16',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace']
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Chart.js for Advanced Analytics -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- SheetJS for Excel Import -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        
+        /* Custom Scrollbar for a premium feel */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+        .dark ::-webkit-scrollbar-thumb { background: #1f2937; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .dark ::-webkit-scrollbar-thumb:hover { background: #374151; }
+
+        /* Smooth transitions for theme switching */
+        * { transition-property: background-color, border-color, color, fill, stroke; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 200ms; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 dark:bg-[#020503] dark:text-[#e2e8f0] min-h-screen antialiased selection:bg-winet-500 selection:text-white" id="app-body">
+
+    <div id="app" class="min-h-screen flex flex-col">
+        <!-- Dynamic views injected here -->
+    </div>
+
+    <!-- Global Modal Container -->
+    <div id="modal-container"></div>
+
+    <!-- Global Toast Container -->
+    <div id="toast-container" class="fixed bottom-5 right-5 z-[100] flex flex-col gap-2 pointer-events-none"></div>
+
+    <script>
+        const STORAGE_KEYS = {
+            USERS: 'winet_pext_users_v4',
+            TICKETS: 'winet_pext_tickets_v4',
+            CATALOGS: 'winet_pext_catalogs_v4',
+            FORM_FIELDS: 'winet_pext_form_fields_v4',
+            CURRENT_USER: 'winet_pext_current_user_v4',
+            THEME: 'winet_pext_theme_v4'
+        };
+
+        const DEFAULT_USERS = [
+            { id: 'u1', name: 'Ing. Carlos Mendoza', email: 'carlos.mendoza@winet.pe', pass: 'winet2026', role: 'admin' },
+            { id: 'u2', name: 'Ana Torres', email: 'ana.torres@winet.pe', pass: 'noc123', role: 'noc' },
+            { id: 'u3', name: 'Marco Solís', email: 'marco.solis@winet.pe', pass: 'calidad123', role: 'supervisor' },
+            { id: 'u4', name: 'Luis Cutipa', email: 'luis.cutipa@winet.pe', pass: 'luis123', role: 'supervisor' }
+        ];
+
+        const DEFAULT_CATALOGS = {
+            contractors: ['ARKTURIAS', 'FIBERTEK S.A.C.', 'TELECONECTA EIRL', 'REDES ANDINAS S.A.', 'WINET FIELD OPS'],
+            causes: [
+                'Corte de FO por baja altura por cruce de vehículo',
+                'Corte de fibra óptica por cambio de poste',
+                'Corte de fibra óptica por vandalismo',
+                'Corte de FO por obras civiles de terceros',
+                'Atenuación severa en conector CTO por humedad',
+                'Falla de energía en nodo principal',
+                'Rotura de cable drop por caída de árbol'
+            ],
+            solutions: [
+                'Empalme de fusión de fibra óptica y ordenamiento en mufa',
+                'Instalación de nuevo tramo de cable drop y conectores SC/APC',
+                'Reemplazo de splitter óptico en CTO siniestrada',
+                'Reconfiguración y normalización de potencias ópticas',
+                'Reparación de bandeja de acometida y sangrado de FO'
+            ],
+            materials: [
+                { name: 'Conector SC/APC', unit: 'Unidades' },
+                { name: 'Cable Drop 1 Hilo LSZH', unit: 'Metros' },
+                { name: 'Mufa Terminal 24F', unit: 'Piezas' },
+                { name: 'Splice Protector (Mangas)', unit: 'Unidades' },
+                { name: 'Precintos de Nylon', unit: 'Paquetes' }
+            ]
+        };
+
+        const DEFAULT_FORM_FIELDS = {
+            registration: [
+                { id: 'ticketType', label: 'Tipo de Avería', type: 'select', options: 'Avería Clientes Loss, Tickets de Backbone, Tickets de Requerimiento', required: true, active: true },
+                { id: 'category', label: 'Categoría', type: 'select', options: 'AVERIA, BACKBONE, REQUERIMIENTO', required: true, active: true },
+                { id: 'reportArea', label: 'Área que Reporta', type: 'select', options: 'Calidad Operativa, NOC, Campo', required: true, active: true },
+                { id: 'affectedClients', label: 'Clientes Afectados', type: 'number', required: true, active: true },
+                { id: 'elementType', label: 'Tipo de Elemento', type: 'text', required: true, active: true },
+                { id: 'elementCode', label: 'Código del Elemento', type: 'text', required: true, active: true },
+                { id: 'nodo', label: 'Nodo', type: 'text', required: true, active: true },
+                { id: 'project', label: 'Proyecto', type: 'text', required: true, active: true },
+                { id: 'distrito', label: 'Distrito', type: 'text', required: true, active: true },
+                { id: 'zone', label: 'Zona', type: 'text', required: true, active: true },
+                { id: 'lat', label: 'Latitud GPS', type: 'number', required: true, active: true },
+                { id: 'lng', label: 'Longitud GPS', type: 'number', required: true, active: true },
+                { id: 'details', label: 'Detalles / Rotulado', type: 'textarea', required: true, active: true }
+            ],
+            closure: [
+                { id: 'startTime', label: 'Hora Inicio', type: 'time', required: true, active: true },
+                { id: 'endTime', label: 'Hora Fin', type: 'time', required: true, active: true },
+                { id: 'cause', label: 'Causa Raíz', type: 'select_causes', required: true, active: true },
+                { id: 'solution', label: 'Solución Aplicada', type: 'select_solutions', required: true, active: true },
+                { id: 'materialsUsed', label: 'Materiales Utilizados', type: 'materials_list', required: false, active: true }
+            ]
+        };
+
+        if (!localStorage.getItem(STORAGE_KEYS.USERS)) localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(DEFAULT_USERS));
+        if (!localStorage.getItem(STORAGE_KEYS.CATALOGS)) localStorage.setItem(STORAGE_KEYS.CATALOGS, JSON.stringify(DEFAULT_CATALOGS));
+        if (!localStorage.getItem(STORAGE_KEYS.FORM_FIELDS)) localStorage.setItem(STORAGE_KEYS.FORM_FIELDS, JSON.stringify(DEFAULT_FORM_FIELDS));
+        
+        // Ensure Theme is properly set initially (Light by default)
+        let currentTheme = localStorage.getItem(STORAGE_KEYS.THEME) || 'light';
+        if (currentTheme === 'light') { document.documentElement.classList.remove('dark'); } else { document.documentElement.classList.add('dark'); }
+
+        function getUsers() { return JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS)); }
+        function saveUsers(u) { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(u)); }
+
+        function getTickets() {
+            const raw = localStorage.getItem(STORAGE_KEYS.TICKETS);
+            if (!raw) {
+                const initial = [
+                    { id: 'AVE-24953', createdAt: new Date().toISOString(), ticketType: 'Avería Clientes Loss', category: 'AVERIA', reportArea: 'Calidad Operativa', affectedClients: 3, elementType: 'CAJA CTO', elementCode: '2026092820000239', coords: { lat: -11.493341, lng: -77.208746 }, nodo: 'NODO HUARAL', project: 'HUARAL 2', distrito: 'HUARAL', zone: 'LIMA PROVINCIA', details: 'ROTULADO CTO:\nWN-15202-1491957', status: 'pendiente', supervisor: 'LUIS CUTIPA', contractor: 'ARKTURIAS', brigada: 'Huaral', closureData: null },
+                    { id: 'AVE-24954', createdAt: new Date(Date.now() - 3600000 * 4).toISOString(), ticketType: 'Tickets de Backbone', category: 'BACKBONE', reportArea: 'NOC', affectedClients: 120, elementType: 'FO TRONCAL', elementCode: 'BB-TRONCAL-09', coords: { lat: -12.0464, lng: -77.0428 }, nodo: 'NODO SAN LUIS', project: 'LIMA CENTRO 1', distrito: 'SAN LUIS', zone: 'LIMA CENTRO', details: 'Corte de fibra troncal por obras viales.', status: 'en_proceso', assignedAt: new Date(Date.now() - 3600000 * 3).toISOString(), supervisor: 'Marco Solís', contractor: 'FIBERTEK S.A.C.', brigada: 'Brigada San Luis A', closureData: null },
+                    { id: 'AVE-24955', createdAt: new Date(Date.now() - 3600000 * 12).toISOString(), ticketType: 'Tickets de Requerimiento', category: 'REQUERIMIENTO', reportArea: 'Campo', affectedClients: 15, elementType: 'AMPLIFICADOR', elementCode: 'AMP-HUANDOY-02', coords: { lat: -11.9850, lng: -77.0650 }, nodo: 'NODO HUANDOY', project: 'LOS OLIVOS N', distrito: 'LOS OLIVOS', zone: 'LIMA NORTE', details: 'Mantenimiento preventivo.', status: 'finalizado', assignedAt: new Date(Date.now() - 3600000 * 10).toISOString(), supervisor: 'Marco Solís', contractor: 'REDES ANDINAS S.A.', brigada: 'Brigada Norte 1', closureData: { startTime: '08:30', endTime: '11:15', cause: 'Atenuación severa en conector CTO por humedad', solution: 'Reconfiguración y normalización de potencias ópticas', materials: [{ name: 'Conector SC/APC', qty: 4 }], closedAt: new Date(Date.now() - 3600000 * 8).toISOString() } }
+                ];
+                localStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(initial));
+                return initial;
+            }
+            return JSON.parse(raw);
+        }
+        function saveTickets(t) { localStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(t)); }
+        function getCatalogs() { return JSON.parse(localStorage.getItem(STORAGE_KEYS.CATALOGS)); }
+        function saveCatalogs(c) { localStorage.setItem(STORAGE_KEYS.CATALOGS, JSON.stringify(c)); }
+        function getFormFields() { return JSON.parse(localStorage.getItem(STORAGE_KEYS.FORM_FIELDS)); }
+        function saveFormFields(f) { localStorage.setItem(STORAGE_KEYS.FORM_FIELDS, JSON.stringify(f)); }
+        function getCurrentUser() { const raw = localStorage.getItem(STORAGE_KEYS.CURRENT_USER); return raw ? JSON.parse(raw) : null; }
+        function setCurrentUser(u) { if (u) localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(u)); else localStorage.removeItem(STORAGE_KEYS.CURRENT_USER); }
+
+        function showToast(msg, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            // Adaptive toast based on mode using Tailwind dark: modifiers
+            const baseClass = "pointer-events-auto px-4 py-3 rounded-xl shadow-lg text-sm font-semibold flex items-center gap-3 border transition-all transform translate-y-2 opacity-0";
+            const typeClass = type === 'success' 
+                ? "bg-white text-slate-800 border-green-500/30 dark:bg-[#0a110c] dark:text-white dark:border-green-500" 
+                : "bg-white text-slate-800 border-rose-500/30 dark:bg-rose-950 dark:text-white dark:border-rose-600";
+            
+            const iconColor = type === 'success' ? 'text-green-500' : 'text-rose-500';
+            
+            toast.className = `${baseClass} ${typeClass}`;
+            toast.innerHTML = `<i data-lucide="${type === 'success' ? 'check-circle-2' : 'alert-circle'}" class="w-5 h-5 ${iconColor}"></i> <span>${msg}</span>`;
+            container.appendChild(toast);
+            lucide.createIcons();
+            
+            setTimeout(() => { toast.classList.remove('translate-y-2', 'opacity-0'); }, 10);
+            setTimeout(() => {
+                toast.classList.add('translate-y-2', 'opacity-0');
+                setTimeout(() => toast.remove(), 300);
+            }, 3500);
+        }
+
+        let currentView = 'dashboard';
+        let mapInstance = null;
+        let tempMaterials = []; // Variable temporal para materiales en cierre
+
+        // Calculadora de Tiempo Transcurrido (SLA)
+        function getElapsedTime(startIso, endIso = null) {
+            if (!startIso) return { text: '0h 0m', ms: 0 };
+            const start = new Date(startIso);
+            const end = endIso ? new Date(endIso) : new Date();
+            const diffMs = end - start;
+            if (diffMs < 0) return { text: '0h 0m', ms: 0 };
+            const hrs = Math.floor(diffMs / (1000 * 60 * 60));
+            const mins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+            return { text: `${hrs}h ${mins}m`, ms: diffMs };
+        }
+
+        function setTheme(theme) {
+            currentTheme = theme;
+            localStorage.setItem(STORAGE_KEYS.THEME, theme);
+            if (theme === 'light') {
+                document.documentElement.classList.remove('dark');
+            } else {
+                document.documentElement.classList.add('dark');
+            }
+        }
+
+        function switchView(view) {
+            currentView = view;
+            renderApp();
+        }
+
+        function renderApp() {
+            const user = getCurrentUser();
+            const appEl = document.getElementById('app');
+
+            if (!user) {
+                appEl.innerHTML = renderLoginScreen();
+                lucide.createIcons();
+                return;
+            }
+
+            appEl.innerHTML = `
+                <header class="sticky top-0 z-40 bg-white dark:bg-[#0a110c]/90 dark:backdrop-blur-xl border-b border-slate-200 dark:border-[#122b1c] px-4 lg:px-8 py-3 flex items-center justify-between shadow-sm dark:shadow-none">
+                    <div class="flex items-center gap-8">
+                        <!-- WINET Logo (Modern Corporate) -->
+                        <div class="flex items-center gap-1 cursor-pointer group" onclick="switchView('dashboard')">
+                            <div class="font-black tracking-tighter text-3xl flex items-center">
+                                <span class="text-slate-900 dark:text-white">wi</span>
+                                <span class="w-3 h-3 mx-0.5 rounded-full bg-winet-500 relative -top-2 shadow-[0_0_10px_rgba(34,197,94,0.5)]"></span>
+                                <span class="text-slate-900 dark:text-white">net</span>
+                            </div>
+                        </div>
+
+                        <!-- Navigation Menu -->
+                        <nav class="hidden md:flex items-center gap-2 text-sm font-semibold">
+                            <button onclick="switchView('dashboard')" class="px-4 py-2 rounded-lg transition-all flex items-center gap-2 ${currentView === 'dashboard' ? 'bg-slate-100 text-winet-700 dark:bg-winet-900/30 dark:text-winet-400' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50 dark:text-stone-400 dark:hover:text-white dark:hover:bg-[#122b1c]'}">
+                                <i data-lucide="layout-dashboard" class="w-4 h-4"></i> Dashboard
+                            </button>
+                            <button onclick="switchView('queues')" class="px-4 py-2 rounded-lg transition-all flex items-center gap-2 ${currentView === 'queues' ? 'bg-slate-100 text-winet-700 dark:bg-winet-900/30 dark:text-winet-400' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50 dark:text-stone-400 dark:hover:text-white dark:hover:bg-[#122b1c]'}">
+                                <i data-lucide="kanban" class="w-4 h-4"></i> Colas / Asignación
+                            </button>
+                            <button onclick="switchView('new_ticket')" class="px-4 py-2 rounded-lg transition-all flex items-center gap-2 ${currentView === 'new_ticket' ? 'bg-slate-100 text-winet-700 dark:bg-winet-900/30 dark:text-winet-400' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50 dark:text-stone-400 dark:hover:text-white dark:hover:bg-[#122b1c]'}">
+                                <i data-lucide="plus-circle" class="w-4 h-4"></i> Registrar Avería
+                            </button>
+                            <button onclick="switchView('telegram_summary')" class="px-4 py-2 rounded-lg transition-all flex items-center gap-2 ${currentView === 'telegram_summary' ? 'bg-slate-100 text-winet-700 dark:bg-winet-900/30 dark:text-winet-400' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50 dark:text-stone-400 dark:hover:text-white dark:hover:bg-[#122b1c]'}">
+                                <i data-lucide="send" class="w-4 h-4"></i> Telegram
+                            </button>
+                            <button onclick="switchView('analytics')" class="px-4 py-2 rounded-lg transition-all flex items-center gap-2 ${currentView === 'analytics' ? 'bg-slate-100 text-winet-700 dark:bg-winet-900/30 dark:text-winet-400' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50 dark:text-stone-400 dark:hover:text-white dark:hover:bg-[#122b1c]'}">
+                                <i data-lucide="pie-chart" class="w-4 h-4"></i> Analítica
+                            </button>
+                            <button onclick="switchView('liquidation')" class="px-4 py-2 rounded-lg transition-all flex items-center gap-2 ${currentView === 'liquidation' ? 'bg-slate-100 text-winet-700 dark:bg-winet-900/30 dark:text-winet-400' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50 dark:text-stone-400 dark:hover:text-white dark:hover:bg-[#122b1c]'}">
+                                <i data-lucide="calculator" class="w-4 h-4"></i> Liquidación
+                            </button>
+                            ${user.role === 'admin' ? `
+                                <div class="w-px h-5 bg-slate-300 dark:bg-[#122b1c] mx-1"></div>
+                                <button onclick="switchView('db_manager')" class="px-4 py-2 rounded-lg transition-all flex items-center gap-2 ${currentView === 'db_manager' ? 'bg-slate-100 text-winet-700 dark:bg-winet-900/30 dark:text-winet-400' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50 dark:text-stone-400 dark:hover:text-white dark:hover:bg-[#122b1c]'}">
+                                    <i data-lucide="database" class="w-4 h-4"></i> Catálogos
+                                </button>
+                                <button onclick="switchView('form_builder')" class="px-4 py-2 rounded-lg transition-all flex items-center gap-2 ${currentView === 'form_builder' ? 'bg-slate-100 text-winet-700 dark:bg-winet-900/30 dark:text-winet-400' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50 dark:text-stone-400 dark:hover:text-white dark:hover:bg-[#122b1c]'}">
+                                    <i data-lucide="sliders" class="w-4 h-4"></i> Formularios
+                                </button>
+                            ` : ''}
+                        </nav>
+                    </div>
+
+                    <!-- Right Controls -->
+                    <div class="flex items-center gap-4">
+                        <div class="flex items-center bg-slate-100 dark:bg-[#020503] p-1 rounded-lg border border-slate-200 dark:border-[#122b1c]">
+                            <button onclick="setTheme('light')" class="p-1.5 rounded-md text-sm ${currentTheme === 'light' ? 'bg-white shadow text-winet-600' : 'text-slate-500 hover:text-slate-800'}">
+                                <i data-lucide="sun" class="w-4 h-4"></i>
+                            </button>
+                            <button onclick="setTheme('dark')" class="p-1.5 rounded-md text-sm ${currentTheme === 'dark' ? 'bg-[#15803d] shadow text-white' : 'text-stone-500 dark:hover:text-white'}">
+                                <i data-lucide="moon" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+
+                        <div class="flex items-center gap-3 pl-4 border-l border-slate-200 dark:border-[#122b1c]">
+                            <div class="text-right hidden sm:block">
+                                <div class="text-sm font-bold text-slate-900 dark:text-white leading-tight">${user.name}</div>
+                                <div class="text-[10px] font-mono text-winet-600 dark:text-winet-400 uppercase font-bold">${user.role}</div>
+                            </div>
+                            <button onclick="logout()" class="p-2 rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100 dark:bg-rose-500/10 dark:text-rose-400 dark:hover:bg-rose-500/20 transition-all" title="Cerrar Sesión">
+                                <i data-lucide="log-out" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                    </div>
+                </header>
+
+                <main class="flex-1 p-4 lg:p-8 max-w-[1700px] w-full mx-auto">
+                    ${currentView === 'dashboard' ? renderDashboardView() :
+                      currentView === 'queues' ? renderQueuesView() :
+                      currentView === 'new_ticket' ? renderNewTicketView() :
+                      currentView === 'telegram_summary' ? renderTelegramSummaryView() :
+                      currentView === 'analytics' ? renderAnalyticsView() :
+                      currentView === 'liquidation' ? renderLiquidationView() :
+                      currentView === 'db_manager' && user.role === 'admin' ? renderDbManagerView() :
+                      currentView === 'form_builder' && user.role === 'admin' ? renderFormBuilderView() : renderDashboardView()}
+                </main>
+            `;
+
+            lucide.createIcons();
+            if (currentView === 'dashboard') initDashboardMap();
+            if (currentView === 'analytics') setTimeout(initAnalyticsCharts, 100);
+        }
+
+        function renderLoginScreen() {
+            return `
+                <div class="min-h-screen flex items-center justify-center p-4 bg-slate-50 dark:bg-gradient-to-br dark:from-[#020503] dark:via-[#081c0d] dark:to-[#010a04]">
+                    <div class="w-full max-w-md bg-white dark:bg-[#0a110c] p-8 rounded-3xl shadow-xl dark:shadow-2xl border border-slate-200 dark:border-winet-500/20 space-y-8 relative overflow-hidden">
+                        
+                        <div class="text-center space-y-2">
+                            <div class="flex justify-center mb-4">
+                                <div class="font-black tracking-tighter text-5xl flex items-center">
+                                    <span class="text-slate-900 dark:text-white">wi</span>
+                                    <span class="w-4 h-4 mx-1 rounded-full bg-winet-500 relative -top-3 shadow-[0_0_15px_rgba(34,197,94,0.6)]"></span>
+                                    <span class="text-slate-900 dark:text-white">net</span>
+                                </div>
+                            </div>
+                            <h1 class="text-sm font-bold text-slate-500 dark:text-stone-400 uppercase tracking-widest">Sistema PEXT</h1>
+                            <p class="text-xs text-slate-400 dark:text-stone-500">Gestión Operativa de Planta Externa</p>
+                        </div>
+
+                        <form onsubmit="handleLogin(event)" class="space-y-5">
+                            <div>
+                                <label class="block text-xs font-bold text-slate-700 dark:text-stone-300 uppercase mb-1.5">Correo Corporativo</label>
+                                <input type="email" id="login-email" required placeholder="usuario@winet.pe" class="w-full bg-slate-50 dark:bg-[#020503] border border-slate-200 dark:border-[#122b1c] rounded-xl px-4 py-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-winet-500/50 focus:border-winet-500 transition-all font-mono">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-700 dark:text-stone-300 uppercase mb-1.5">Contraseña</label>
+                                <input type="password" id="login-pass" required placeholder="••••••••" class="w-full bg-slate-50 dark:bg-[#020503] border border-slate-200 dark:border-[#122b1c] rounded-xl px-4 py-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-winet-500/50 focus:border-winet-500 transition-all font-mono">
+                            </div>
+
+                            <button type="submit" class="w-full py-3.5 rounded-xl bg-winet-600 hover:bg-winet-700 text-white text-sm font-bold shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2">
+                                <i data-lucide="log-in" class="w-4 h-4"></i> Iniciar Sesión
+                            </button>
+                        </form>
+
+                        <div class="bg-slate-50 dark:bg-[#030a05] border border-slate-100 dark:border-[#122b1c] rounded-xl p-4 text-[11px] text-slate-500 dark:text-stone-400 space-y-1.5 font-mono">
+                            <div class="font-bold text-winet-600 dark:text-winet-400 mb-1">Cuentas Demo:</div>
+                            <div>• Admin: <span class="text-slate-800 dark:text-white">carlos.mendoza@winet.pe</span> / winet2026</div>
+                            <div>• Supervisor: <span class="text-slate-800 dark:text-white">marco.solis@winet.pe</span> / calidad123</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function handleLogin(e) {
+            e.preventDefault();
+            const email = document.getElementById('login-email').value.trim();
+            const pass = document.getElementById('login-pass').value.trim();
+            const user = getUsers().find(u => u.email === email && u.pass === pass);
+
+            if (user) {
+                setCurrentUser(user);
+                showToast(`Bienvenido, ${user.name}`, 'success');
+                renderApp();
+            } else {
+                showToast('Credenciales incorrectas.', 'error');
+            }
+        }
+
+        function logout() {
+            setCurrentUser(null);
+            renderApp();
+        }
+
+        function renderDashboardView() {
+            const tickets = getTickets();
+            const searchQ = document.getElementById('dash-search')?.value.toLowerCase() || '';
+            const statusF = document.getElementById('dash-status-filter')?.value || 'all';
+            const typeF = document.getElementById('dash-type-filter')?.value || 'all';
+
+            const filteredTickets = tickets.filter(t => {
+                const matchSearch = t.id.toLowerCase().includes(searchQ) || t.elementCode.toLowerCase().includes(searchQ) || t.nodo.toLowerCase().includes(searchQ);
+                const matchStatus = statusF === 'all' || t.status === statusF;
+                const matchType = typeF === 'all' || t.ticketType === typeF;
+                return matchSearch && matchStatus && matchType;
+            });
+
+            const totalClients = tickets.reduce((acc, t) => acc + (t.affectedClients || 0), 0);
+            const pendCount = tickets.filter(t => t.status === 'pendiente').length;
+            const procCount = tickets.filter(t => t.status === 'en_proceso').length;
+            const finCount = tickets.filter(t => t.status === 'finalizado').length;
+
+            // Analytics Data
+            const nodeMap = {}; const causeMap = {}; const distMap = {};
+            tickets.forEach(t => {
+                nodeMap[t.nodo] = (nodeMap[t.nodo] || 0) + 1;
+                if (t.closureData?.cause) causeMap[t.closureData.cause] = (causeMap[t.closureData.cause] || 0) + 1;
+                distMap[t.distrito] = (distMap[t.distrito] || 0) + 1;
+            });
+
+            const topNodes = Object.entries(nodeMap).sort((a,b) => b[1] - a[1]).slice(0, 4);
+            const topCauses = Object.entries(causeMap).sort((a,b) => b[1] - a[1]).slice(0, 3);
+            const topDists = Object.entries(distMap).sort((a,b) => b[1] - a[1]).slice(0, 4);
+
+            return `
+                <div class="space-y-6">
+                    <!-- Executive KPI Summary Header -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                        ${renderKpiCard('Clientes Afectados', totalClients.toLocaleString(), 'users', 'text-slate-500 dark:text-stone-400', 'bg-slate-100 text-slate-600 dark:bg-slate-800/50 dark:text-slate-400')}
+                        ${renderKpiCard('Tickets Totales', tickets.length, 'ticket', 'text-blue-500', 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400')}
+                        ${renderKpiCard('Pendientes (Cola)', pendCount, 'clock', 'text-amber-500', 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400')}
+                        ${renderKpiCard('En Proceso', procCount, 'activity', 'text-sky-500', 'bg-sky-50 text-sky-600 dark:bg-sky-500/10 dark:text-sky-400')}
+                        ${renderKpiCard('Finalizados', finCount, 'check-circle', 'text-winet-500', 'bg-winet-50 text-winet-600 dark:bg-winet-500/10 dark:text-winet-400')}
+                    </div>
+
+                    <!-- Power BI Analytics Grid -->
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <!-- Top Nodes -->
+                        <div class="bg-white dark:bg-[#0a110c] p-5 rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm flex flex-col">
+                            <h3 class="text-sm font-bold text-slate-800 dark:text-white flex items-center gap-2 mb-4">
+                                <i data-lucide="bar-chart-2" class="w-4 h-4 text-winet-500"></i> Top Nodos Afectados
+                            </h3>
+                            <div class="space-y-3 flex-1">
+                                ${topNodes.map(([node, count], idx) => `
+                                    <div class="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-[#020503] border border-slate-100 dark:border-[#122b1c] text-sm">
+                                        <div class="flex items-center gap-3">
+                                            <span class="font-bold text-slate-400 dark:text-stone-500">#${idx+1}</span>
+                                            <span class="font-semibold text-slate-700 dark:text-stone-200">${node}</span>
+                                        </div>
+                                        <span class="px-2.5 py-1 rounded-lg bg-winet-100 text-winet-700 dark:bg-winet-900/30 dark:text-winet-400 font-bold">${count}</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+
+                        <!-- Map -->
+                        <div class="bg-white dark:bg-[#0a110c] p-5 rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm flex flex-col lg:col-span-2">
+                            <div class="flex items-center justify-between mb-3">
+                                <h3 class="text-sm font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                                    <i data-lucide="map" class="w-4 h-4 text-winet-500"></i> Mapa Georreferenciado
+                                </h3>
+                                <span class="text-xs text-slate-500 dark:text-stone-400 font-mono">GPS Directo</span>
+                            </div>
+                            <div id="pext-map" class="w-full h-full min-h-[250px] rounded-xl border border-slate-200 dark:border-[#122b1c] overflow-hidden z-10"></div>
+                        </div>
+                    </div>
+
+                    <!-- Filters & Table -->
+                    <div class="bg-white dark:bg-[#0a110c] rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm overflow-hidden">
+                        
+                        <div class="p-4 border-b border-slate-200 dark:border-[#122b1c] bg-slate-50 dark:bg-[#08120c] flex flex-wrap items-center justify-between gap-4">
+                            <div class="flex flex-wrap items-center gap-3 flex-1">
+                                <div class="relative min-w-[240px]">
+                                    <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-2.5"></i>
+                                    <input type="text" id="dash-search" oninput="renderApp()" value="${searchQ}" placeholder="Buscar Ticket, Nodo..." class="w-full bg-white dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] text-sm rounded-lg pl-9 pr-4 py-2 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-winet-500/50">
+                                </div>
+
+                                <select id="dash-status-filter" onchange="renderApp()" class="bg-white dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] text-sm rounded-lg px-3 py-2 text-slate-700 dark:text-white font-semibold focus:outline-none">
+                                    <option value="all">Todos los Estatus</option>
+                                    <option value="pendiente" ${statusF==='pendiente'?'selected':''}>Pendiente</option>
+                                    <option value="en_proceso" ${statusF==='en_proceso'?'selected':''}>En Proceso</option>
+                                    <option value="finalizado" ${statusF==='finalizado'?'selected':''}>Finalizado</option>
+                                </select>
+                            </div>
+                            <button onclick="exportToCSV()" class="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-[#122b1c] dark:hover:bg-[#1a3d28] dark:text-stone-300 text-sm font-bold flex items-center gap-2 transition-all">
+                                <i data-lucide="download" class="w-4 h-4"></i> Exportar CSV
+                            </button>
+                        </div>
+
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left border-collapse text-sm">
+                                <thead>
+                                    <tr class="bg-white dark:bg-[#030905] text-slate-500 dark:text-stone-400 border-b border-slate-200 dark:border-[#122b1c] uppercase tracking-wider font-semibold text-xs">
+                                        <th class="py-3 px-5">Ticket ID</th>
+                                        <th class="py-3 px-5">Tipo / Categoría</th>
+                                        <th class="py-3 px-5">Nodo / Ubicación</th>
+                                        <th class="py-3 px-5">Estatus</th>
+                                        <th class="py-3 px-5">Asignación</th>
+                                        <th class="py-3 px-5 text-right">Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-100 dark:divide-[#122b1c]">
+                                    ${filteredTickets.map(t => renderTicketRow(t)).join('') || `<tr><td colspan="6" class="py-12 text-center text-slate-500 dark:text-stone-500">No hay tickets.</td></tr>`}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderKpiCard(title, value, icon, iconColor, iconBg) {
+            return `
+                <div class="bg-white dark:bg-[#0a110c] p-5 rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm flex items-center justify-between">
+                    <div>
+                        <div class="text-xs font-bold text-slate-500 dark:text-stone-400 uppercase tracking-wider">${title}</div>
+                        <div class="text-2xl font-black text-slate-900 dark:text-white mt-1">${value}</div>
+                    </div>
+                    <div class="p-3 rounded-xl ${iconBg}">
+                        <i data-lucide="${icon}" class="w-6 h-6 ${iconColor}"></i>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderTicketRow(t) {
+            let typeStyle = 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/20';
+            if (t.ticketType === 'Tickets de Backbone') typeStyle = 'bg-indigo-100 text-indigo-800 dark:bg-indigo-500/10 dark:text-indigo-400 border-indigo-200 dark:border-indigo-500/20';
+            if (t.ticketType === 'Tickets de Requerimiento') typeStyle = 'bg-purple-100 text-purple-800 dark:bg-purple-500/10 dark:text-purple-400 border-purple-200 dark:border-purple-500/20';
+
+            let statusStyle = 'bg-amber-100 text-amber-800 dark:bg-amber-500/10 dark:text-amber-400 border-amber-200 dark:border-amber-500/20';
+            let statusText = 'Pendiente';
+            if (t.status === 'en_proceso') { statusStyle = 'bg-sky-100 text-sky-800 dark:bg-sky-500/10 dark:text-sky-400 border-sky-200 dark:border-sky-500/20'; statusText = 'En Proceso'; }
+            if (t.status === 'finalizado') { statusStyle = 'bg-green-100 text-green-800 dark:bg-winet-500/10 dark:text-winet-400 border-green-200 dark:border-winet-500/20'; statusText = 'Finalizado'; }
+
+            return `
+                <tr class="hover:bg-slate-50 dark:hover:bg-[#030a05] transition-colors group">
+                    <td class="py-3 px-5">
+                        <div class="font-mono font-bold text-slate-900 dark:text-white">${t.id}</div>
+                        <div class="text-xs text-slate-500 dark:text-stone-400 mt-0.5">${formatCustomDate(t.createdAt)}</div>
+                    </td>
+                    <td class="py-3 px-5">
+                        <span class="inline-block px-2 py-0.5 rounded border text-xs font-semibold ${typeStyle}">${t.ticketType}</span>
+                        <div class="text-xs text-slate-500 dark:text-stone-400 mt-1">Afectados: <b class="text-slate-700 dark:text-stone-300">${t.affectedClients}</b></div>
+                    </td>
+                    <td class="py-3 px-5">
+                        <div class="font-semibold text-slate-800 dark:text-stone-200">${t.nodo}</div>
+                        <div class="text-xs text-slate-500 dark:text-stone-400 mt-0.5">${t.distrito}</div>
+                    </td>
+                    <td class="py-3 px-5">
+                        <div class="flex flex-col gap-1.5 items-start">
+                            <span class="px-2 py-1 rounded border text-xs font-bold ${statusStyle}">${statusText}</span>
+                            <select onchange="updateTicketStatus('${t.id}', this.value)" class="text-[11px] bg-white dark:bg-[#020503] border border-slate-200 dark:border-[#122b1c] rounded px-1 py-0.5 text-slate-600 dark:text-stone-400 focus:outline-none">
+                                <option value="pendiente" ${t.status==='pendiente'?'selected':''}>Marcar Pendiente</option>
+                                <option value="en_proceso" ${t.status==='en_proceso'?'selected':''}>Marcar En Proceso</option>
+                                <option value="finalizado" ${t.status==='finalizado'?'selected':''}>Marcar Finalizado</option>
+                            </select>
+                        </div>
+                    </td>
+                    <td class="py-3 px-5">
+                        <div class="font-semibold text-slate-800 dark:text-stone-200 text-sm">${t.supervisor || 'Sin Asignar'}</div>
+                        <div class="text-xs text-winet-600 dark:text-winet-400 font-mono mt-0.5">${t.contractor || 'Sin Contratista'}</div>
+                    </td>
+                    <td class="py-3 px-5 text-right">
+                        <div class="flex items-center justify-end gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onclick="quickTelegramModal('${t.id}')" class="p-1.5 rounded-md hover:bg-slate-200 dark:hover:bg-[#122b1c] text-blue-600 dark:text-blue-400" title="Telegram">
+                                <i data-lucide="send" class="w-4 h-4"></i>
+                            </button>
+                            <button onclick="openEditTicketModal('${t.id}')" class="p-1.5 rounded-md hover:bg-slate-200 dark:hover:bg-[#122b1c] text-slate-600 dark:text-stone-300" title="Editar">
+                                <i data-lucide="pencil" class="w-4 h-4"></i>
+                            </button>
+                            ${t.status !== 'finalizado' ? `
+                                <button onclick="openClosureModal('${t.id}')" class="p-1.5 rounded-md hover:bg-winet-100 dark:hover:bg-winet-900/30 text-winet-600 dark:text-winet-400" title="Cerrar Avería">
+                                    <i data-lucide="check-square" class="w-4 h-4"></i>
+                                </button>
+                            ` : `
+                                <button onclick="viewClosureDetails('${t.id}')" class="p-1.5 rounded-md hover:bg-slate-200 dark:hover:bg-[#122b1c] text-slate-600 dark:text-stone-300" title="Ver Cierre">
+                                    <i data-lucide="eye" class="w-4 h-4"></i>
+                                </button>
+                            `}
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }
+
+        function initDashboardMap() {
+            const mapEl = document.getElementById('pext-map');
+            if (!mapEl) return;
+            if (mapInstance) { mapInstance.remove(); mapInstance = null; }
+
+            const tickets = getTickets();
+            const validCoords = tickets.filter(t => t.coords && typeof t.coords.lat === 'number');
+            const centerLat = validCoords.length > 0 ? validCoords[0].coords.lat : -12.0464;
+            const centerLng = validCoords.length > 0 ? validCoords[0].coords.lng : -77.0428;
+
+            mapInstance = L.map('pext-map').setView([centerLat, centerLng], 10);
+
+            // CHANGED: Using the standard OpenStreetMap tile layer (100% free, no API key)
+            L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            }).addTo(mapInstance);
+
+            tickets.forEach(t => {
+                if (t.coords && t.coords.lat) {
+                    const marker = L.marker([t.coords.lat, t.coords.lng]).addTo(mapInstance);
+                    const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${t.coords.lat},${t.coords.lng}`;
+                    marker.bindPopup(`
+                        <div class="p-1 font-sans text-sm">
+                            <strong class="text-winet-700">${t.id}</strong><br>
+                            Nodo: ${t.nodo}<br>
+                            <a href="${googleMapsUrl}" target="_blank" class="mt-2 inline-block px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600">Abrir en Google Maps ↗</a>
+                        </div>
+                    `);
+                }
+            });
+        }
+
+        function openModal(htmlContent) {
+            const container = document.getElementById('modal-container');
+            container.innerHTML = `
+                <div class="fixed inset-0 z-[60] bg-slate-900/50 dark:bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+                    ${htmlContent}
+                </div>
+            `;
+            lucide.createIcons();
+        }
+        function closeModal() { document.getElementById('modal-container').innerHTML = ''; }
+
+        function renderNewTicketView() {
+            const catalogs = getCatalogs();
+            const supervisors = getUsers().filter(u => u.role !== 'noc');
+            const newId = `AVE-${Math.floor(10000 + Math.random() * 90000)}`;
+
+            return `
+                <div class="max-w-4xl mx-auto space-y-6">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h2 class="text-2xl font-black text-slate-900 dark:text-white flex items-center gap-3">
+                                <i data-lucide="plus-circle" class="text-winet-500"></i> Registro de Nueva Avería
+                            </h2>
+                            <p class="text-sm text-slate-500 dark:text-stone-400 mt-1">Complete los datos de la incidencia. La asignación es opcional.</p>
+                        </div>
+                        <button onclick="switchView('dashboard')" class="px-4 py-2 bg-white dark:bg-[#0a110c] border border-slate-200 dark:border-[#122b1c] rounded-xl text-sm font-semibold shadow-sm hover:bg-slate-50 dark:hover:bg-[#122b1c] transition-colors">
+                            Volver
+                        </button>
+                    </div>
+
+                    <form id="new-ticket-form" onsubmit="handleCreateTicketSubmit(event, '${newId}')" class="bg-white dark:bg-[#0a110c] p-6 lg:p-8 rounded-3xl shadow-sm border border-slate-200 dark:border-[#122b1c] space-y-6">
+                        <div class="flex justify-between border-b border-slate-100 dark:border-[#122b1c] pb-4">
+                            <div><span class="text-xs font-bold text-slate-500 uppercase">ID Autogenerado</span><div class="text-xl font-mono font-black text-winet-600 dark:text-winet-500">${newId}</div></div>
+                            <div class="text-right"><span class="text-xs font-bold text-slate-500 uppercase">Fecha</span><div class="text-sm font-mono text-slate-800 dark:text-white">${formatCustomDate(new Date().toISOString())}</div></div>
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            ${renderInputGroup('Tipo de Avería', 'reg-ticket-type', 'select', ['Avería Clientes Loss', 'Tickets de Backbone', 'Tickets de Requerimiento'])}
+                            ${renderInputGroup('Categoría', 'reg-category', 'select', ['AVERIA', 'BACKBONE', 'REQUERIMIENTO'])}
+                            ${renderInputGroup('Área que Reporta', 'reg-report-area', 'select', ['Calidad Operativa', 'NOC', 'Campo'])}
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            ${renderInputGroup('Clientes Afectados', 'reg-clients', 'number', null, '', 'Ej. 3')}
+                            ${renderInputGroup('Tipo de Elemento', 'reg-eltype', 'text', null, '', 'Ej. Caja CTO')}
+                            ${renderInputGroup('Código de Elemento', 'reg-elcode', 'text', null, '', 'Ej. 20260928200')}
+                        </div>
+
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                            ${renderInputGroup('Nodo', 'reg-nodo', 'text', null, '', 'Ej. NODO HUARAL')}
+                            ${renderInputGroup('Proyecto', 'reg-project', 'text', null, '', 'Ej. HUARAL 2')}
+                            ${renderInputGroup('Distrito', 'reg-distrito', 'text', null, '', 'Ej. Huaral')}
+                            ${renderInputGroup('Zona', 'reg-zone', 'text', null, '', 'Ej. LIMA PROVINCIA')}
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 p-4 bg-slate-50 dark:bg-[#020503] rounded-xl border border-slate-100 dark:border-[#122b1c]">
+                            ${renderInputGroup('Supervisor Asignado (Opcional)', 'reg-supervisor', 'select', supervisors.map(s=>s.name), '', '', '', false)}
+                            ${renderInputGroup('Contratista (Opcional)', 'reg-contractor', 'select', catalogs.contractors, '', '', '', false)}
+                            ${renderInputGroup('Brigada (Opcional)', 'reg-brigada', 'text', null, '', 'Ej. Brigada 1', '', false)}
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4">
+                            ${renderInputGroup('Latitud GPS', 'reg-lat', 'number', null, '', 'Ej. -11.4933', 'any')}
+                            ${renderInputGroup('Longitud GPS', 'reg-lng', 'number', null, '', 'Ej. -77.2087', 'any')}
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 dark:text-stone-300 uppercase mb-1">Detalles Adicionales</label>
+                            <textarea id="reg-details" rows="3" required class="w-full bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] rounded-xl p-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-winet-500/50 focus:border-winet-500 font-mono" placeholder="Describa la avería, rotulados, etc..."></textarea>
+                        </div>
+
+                        <div class="flex justify-end gap-3 pt-4 border-t border-slate-100 dark:border-[#122b1c]">
+                            <button type="reset" class="px-6 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-[#122b1c] dark:hover:bg-[#1a3d28] dark:text-stone-300 text-sm font-bold shadow-sm transition-all flex items-center gap-2">
+                                <i data-lucide="eraser" class="w-4 h-4"></i> Limpiar Formulario
+                            </button>
+                            <button type="submit" class="px-8 py-3 rounded-xl bg-winet-600 hover:bg-winet-700 text-white text-sm font-bold shadow-md flex items-center gap-2 transition-all">
+                                <i data-lucide="save" class="w-4 h-4"></i> Registrar Ticket
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            `;
+        }
+
+        function renderInputGroup(label, id, type, options = null, val = '', placeholder = '', step = '', required = true) {
+            const baseClass = "w-full bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] rounded-xl px-4 py-2.5 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-winet-500/50 focus:border-winet-500 transition-all font-medium";
+            let inputHtml = '';
+            const reqAttr = required ? 'required' : '';
+            
+            if (type === 'select' && options) {
+                let opts = options.map(o => `<option value="${o}">${o}</option>`).join('');
+                if (!required) {
+                    opts = `<option value="">Seleccione... (Opcional)</option>` + opts;
+                }
+                inputHtml = `<select id="${id}" ${reqAttr} class="${baseClass}">${opts}</select>`;
+            } else {
+                inputHtml = `<input type="${type}" id="${id}" ${reqAttr} value="${val}" placeholder="${placeholder}" step="${step}" class="${baseClass}">`;
+            }
+
+            return `
+                <div>
+                    <label class="block text-[11px] font-bold text-slate-500 dark:text-stone-400 uppercase tracking-wider mb-1">${label}</label>
+                    ${inputHtml}
+                </div>
+            `;
+        }
+
+        function handleCreateTicketSubmit(e, newId) {
+            e.preventDefault();
+            const tickets = getTickets();
+            const newTicket = {
+                id: newId,
+                createdAt: new Date().toISOString(),
+                ticketType: document.getElementById('reg-ticket-type').value,
+                category: document.getElementById('reg-category').value,
+                reportArea: document.getElementById('reg-report-area').value,
+                affectedClients: parseInt(document.getElementById('reg-clients').value) || 3,
+                elementType: document.getElementById('reg-eltype').value.trim(),
+                elementCode: document.getElementById('reg-elcode').value.trim(),
+                coords: { lat: parseFloat(document.getElementById('reg-lat').value), lng: parseFloat(document.getElementById('reg-lng').value) },
+                nodo: document.getElementById('reg-nodo').value.trim().toUpperCase(),
+                project: document.getElementById('reg-project').value.trim().toUpperCase(),
+                distrito: document.getElementById('reg-distrito').value.trim().toUpperCase(),
+                zone: document.getElementById('reg-zone').value.trim().toUpperCase(),
+                details: document.getElementById('reg-details').value.trim(),
+                status: 'pendiente', assignedAt: null,
+                supervisor: document.getElementById('reg-supervisor').value,
+                contractor: document.getElementById('reg-contractor').value,
+                brigada: document.getElementById('reg-brigada').value.trim(),
+                closureData: null
+            };
+            tickets.unshift(newTicket);
+            saveTickets(tickets);
+            showToast(`Ticket ${newId} registrado.`, 'success');
+            switchView('dashboard');
+        }
+
+        function openEditTicketModal(ticketId) {
+            const ticket = getTickets().find(t => t.id === ticketId);
+            if (!ticket) return;
+            const supervisors = getUsers().filter(u => u.role !== 'noc').map(s=>s.name);
+            const catalogs = getCatalogs();
+
+            const html = `
+                <div class="bg-white dark:bg-[#0a110c] rounded-3xl max-w-3xl w-full p-6 shadow-2xl border border-slate-200 dark:border-[#122b1c] max-h-[90vh] overflow-y-auto">
+                    <div class="flex justify-between items-center mb-5 pb-3 border-b border-slate-100 dark:border-[#122b1c]">
+                        <h3 class="text-lg font-bold text-slate-800 dark:text-white">Editar Ticket • <span class="text-winet-600 dark:text-winet-500 font-mono">${ticket.id}</span></h3>
+                        <button onclick="closeModal()" class="text-slate-400 hover:text-slate-800 dark:hover:text-white"><i data-lucide="x"></i></button>
+                    </div>
+                    <form onsubmit="handleEditSubmit(event, '${ticket.id}')" class="space-y-4">
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                            ${renderInputGroup('Clientes', 'ed-clients', 'number', null, ticket.affectedClients)}
+                            ${renderInputGroup('Elemento', 'ed-eltype', 'text', null, ticket.elementType)}
+                            ${renderInputGroup('Código', 'ed-elcode', 'text', null, ticket.elementCode)}
+                            ${renderInputGroup('Nodo', 'ed-nodo', 'text', null, ticket.nodo)}
+                        </div>
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                            ${renderInputGroup('Proyecto', 'ed-project', 'text', null, ticket.project)}
+                            ${renderInputGroup('Distrito', 'ed-distrito', 'text', null, ticket.distrito)}
+                            ${renderInputGroup('Zona', 'ed-zone', 'text', null, ticket.zone)}
+                            ${renderInputGroup('Brigada', 'ed-brigada', 'text', null, ticket.brigada)}
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            ${renderInputGroup('Supervisor', 'ed-sup', 'select', supervisors.map(s => `<option value="${s}" ${ticket.supervisor===s?'selected':''}>${s}</option>`))}
+                            ${renderInputGroup('Contratista', 'ed-con', 'select', catalogs.contractors.map(c => `<option value="${c}" ${ticket.contractor===c?'selected':''}>${c}</option>`))}
+                        </div>
+                        <div class="flex justify-end gap-2 pt-3">
+                            <button type="submit" class="px-6 py-2 bg-winet-600 text-white font-bold rounded-xl text-sm">Guardar Cambios</button>
+                        </div>
+                    </form>
+                </div>
+            `;
+            openModal(html);
+        }
+
+        function handleEditSubmit(e, id) {
+            e.preventDefault();
+            const tickets = getTickets();
+            const t = tickets.find(x => x.id === id);
+            t.affectedClients = document.getElementById('ed-clients').value;
+            t.elementType = document.getElementById('ed-eltype').value;
+            t.elementCode = document.getElementById('ed-elcode').value;
+            t.nodo = document.getElementById('ed-nodo').value;
+            t.project = document.getElementById('ed-project').value;
+            t.distrito = document.getElementById('ed-distrito').value;
+            t.zone = document.getElementById('ed-zone').value;
+            t.brigada = document.getElementById('ed-brigada').value;
+            // The select fields injected raw HTML options above to handle selected state, so value reading works standardly:
+            t.supervisor = document.getElementById('ed-sup').value;
+            t.contractor = document.getElementById('ed-con').value;
+            
+            saveTickets(tickets); showToast('Actualizado', 'success'); closeModal(); renderApp();
+        }
+
+        function updateTicketStatus(id, stat) {
+            const tickets = getTickets();
+            const t = tickets.find(x => x.id === id);
+            t.status = stat;
+            if(stat === 'en_proceso' && !t.assignedAt) t.assignedAt = new Date().toISOString();
+            saveTickets(tickets); showToast('Estatus actualizado'); renderApp();
+        }
+
+        function quickTelegramModal(id) {
+            const t = getTickets().find(x => x.id === id);
+            const text = buildTelegramFormat(t);
+            openModal(`
+                <div class="bg-white dark:bg-[#0a110c] rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-[#122b1c]">
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="font-bold text-slate-800 dark:text-white flex items-center gap-2"><i data-lucide="send" class="w-4 h-4 text-blue-500"></i> Telegram • ${id}</h3>
+                        <button onclick="closeModal()" class="text-slate-400 hover:text-slate-800 dark:hover:text-white"><i data-lucide="x"></i></button>
+                    </div>
+                    <textarea id="qt-box" rows="15" readonly class="w-full bg-slate-50 dark:bg-[#020503] text-slate-700 dark:text-winet-400 border border-slate-200 dark:border-[#122b1c] rounded-xl p-3 font-mono text-xs focus:outline-none">${text}</textarea>
+                    <button onclick="document.getElementById('qt-box').select(); document.execCommand('copy'); showToast('Copiado'); closeModal();" class="w-full mt-3 py-2.5 bg-blue-600 text-white rounded-xl font-bold text-sm">Copiar al Portapapeles</button>
+                </div>
+            `);
+        }
+
+        function buildTelegramFormat(t) {
+            return `TICKET:  ${t.id}\nFECHA DE SOLICITUD:  ${formatCustomDate(t.createdAt)}\nAREA QUE REPORTA:  ${(t.reportArea||'').toUpperCase()}\nMOTIVO:  ${(t.ticketType||'').toUpperCase()}\nCATEGORIA:  ${(t.category||'').toUpperCase()}\nCLIENTES AFECTADOS:  ${t.affectedClients}\nELEMENTO:  ${(t.elementType||'').toUpperCase()}\nCODIGO:  ${t.elementCode||''}\nCOORDENADAS:  ${t.coords.lat}, ${t.coords.lng}\nNODO:  ${t.nodo}\nPROYECTO:  ${t.project}\nDISTRITO:  ${t.distrito}\nZONA:  ${t.zone}\nDETALLES:  "${t.details}"\nSUPERVISOR:  ${t.supervisor}\nCONTRATISTA:  ${t.contractor}\nBRIGADA:  ${t.brigada}`;
+        }
+
+        function renderFormBuilderView() {
+            const fields = getFormFields();
+            return `
+                <div class="max-w-5xl mx-auto space-y-6">
+                    <div class="flex justify-between items-center">
+                        <h2 class="text-2xl font-black text-slate-900 dark:text-white flex items-center gap-2"><i data-lucide="sliders" class="text-winet-500"></i> Constructor de Formularios</h2>
+                        <button onclick="switchView('dashboard')" class="px-4 py-2 bg-white dark:bg-[#0a110c] border border-slate-200 dark:border-[#122b1c] rounded-xl text-sm font-semibold shadow-sm">Volver</button>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        ${renderFieldList('registration', 'Registro de Avería', fields.registration)}
+                        ${renderFieldList('closure', 'Cierre de Ticket', fields.closure)}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderFieldList(type, title, fieldArr) {
+            return `
+                <div class="bg-white dark:bg-[#0a110c] p-6 rounded-3xl border border-slate-200 dark:border-[#122b1c] shadow-sm">
+                    <div class="flex justify-between items-center mb-4 pb-2 border-b border-slate-100 dark:border-[#122b1c]">
+                        <h3 class="font-bold text-sm text-slate-800 dark:text-white">${title}</h3>
+                        <button onclick="openBuilderModal('${type}')" class="text-xs bg-winet-600 text-white px-3 py-1.5 rounded-lg font-bold">+ Campo</button>
+                    </div>
+                    <div class="space-y-2">
+                        ${fieldArr.map((f, i) => `
+                            <div class="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-[#020503] border border-slate-200 dark:border-[#122b1c]">
+                                <div>
+                                    <div class="text-sm font-bold text-slate-800 dark:text-white">${f.label} <span class="text-[10px] font-mono text-slate-400">(${f.type})</span></div>
+                                    <div class="text-xs text-winet-600 dark:text-winet-500">${f.active ? 'Activo' : 'Inactivo'}</div>
+                                </div>
+                                <div class="flex gap-1">
+                                    <button onclick="openBuilderModal('${type}', ${i})" class="p-1.5 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 rounded-md"><i data-lucide="pencil" class="w-4 h-4"></i></button>
+                                    <button onclick="toggleFieldStatus('${type}', ${i})" class="p-1.5 text-slate-600 dark:text-slate-400 bg-slate-200 dark:bg-[#122b1c] rounded-md"><i data-lucide="eye" class="w-4 h-4"></i></button>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function openBuilderModal(type, idx = -1) {
+            const fields = getFormFields();
+            const f = idx >= 0 ? fields[type][idx] : { label: '', type: 'text', options: '' };
+            const title = idx >= 0 ? 'Editar Campo' : 'Nuevo Campo';
+
+            const html = `
+                <div class="bg-white dark:bg-[#0a110c] rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-[#122b1c]">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="font-bold text-slate-800 dark:text-white">${title}</h3>
+                        <button onclick="closeModal()" class="text-slate-400 hover:text-slate-800 dark:hover:text-white"><i data-lucide="x"></i></button>
+                    </div>
+                    <form onsubmit="saveBuilderField(event, '${type}', ${idx})" class="space-y-4">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 mb-1">Nombre del Campo</label>
+                            <input type="text" id="fb-label" required value="${f.label}" class="w-full bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] rounded-xl px-4 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-winet-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 mb-1">Tipo de Campo</label>
+                            <select id="fb-type" class="w-full bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] rounded-xl px-4 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-winet-500">
+                                <option value="text" ${f.type === 'text' ? 'selected' : ''}>Texto (Text)</option>
+                                <option value="number" ${f.type === 'number' ? 'selected' : ''}>Número (Number)</option>
+                                <option value="select" ${f.type === 'select' ? 'selected' : ''}>Desplegable (Select)</option>
+                                <option value="textarea" ${f.type === 'textarea' ? 'selected' : ''}>Área de Texto (Textarea)</option>
+                                <option value="time" ${f.type === 'time' ? 'selected' : ''}>Hora (Time)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 mb-1">Opciones (Solo para Select, separadas por coma)</label>
+                            <input type="text" id="fb-options" value="${f.options || ''}" placeholder="Ej: Opción 1, Opción 2" class="w-full bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] rounded-xl px-4 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-winet-500">
+                        </div>
+                        <div class="flex justify-end gap-2 pt-2">
+                            <button type="button" onclick="closeModal()" class="px-5 py-2 text-slate-600 dark:text-slate-400 rounded-xl text-sm font-bold">Cancelar</button>
+                            <button type="submit" class="px-5 py-2 bg-winet-600 text-white rounded-xl text-sm font-bold">Guardar</button>
+                        </div>
+                    </form>
+                </div>
+            `;
+            openModal(html);
+        }
+
+        function initDashboardMap() {
+            const mapEl = document.getElementById('pext-map');
+            if (!mapEl) return;
+            if (mapInstance) { mapInstance.remove(); mapInstance = null; }
+
+            const tickets = getTickets();
+            const validCoords = tickets.filter(t => t.coords && typeof t.coords.lat === 'number' && !isNaN(t.coords.lat));
+            const centerLat = validCoords.length > 0 ? validCoords[0].coords.lat : -12.0464;
+            const centerLng = validCoords.length > 0 ? validCoords[0].coords.lng : -77.0428;
+
+            mapInstance = L.map('pext-map').setView([centerLat, centerLng], 10);
+
+            // CHANGED: Using Esri World Street Map (100% Free, Reliable, No API Key, No 403 Errors)
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 19,
+                attribution: 'Tiles &copy; Esri &mdash; Source: Esri, iPC, NAVTEQ, TomTom, Intermap'
+            }).addTo(mapInstance);
+
+            tickets.forEach(t => {
+                if (t.coords && t.coords.lat && !isNaN(t.coords.lat)) {
+                    const marker = L.marker([t.coords.lat, t.coords.lng]).addTo(mapInstance);
+                    const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${t.coords.lat},${t.coords.lng}`;
+                    marker.bindPopup(`
+                        <div class="p-1 font-sans text-sm">
+                            <strong class="text-winet-700 dark:text-winet-500">${t.id}</strong><br>
+                            Nodo: <span class="font-semibold text-slate-800 dark:text-slate-200">${t.nodo}</span><br>
+                            <a href="${googleMapsUrl}" target="_blank" class="mt-2 inline-block px-3 py-1.5 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 transition-colors">Abrir en Google Maps ↗</a>
+                        </div>
+                    `);
+                }
+            });
+        }
+
+        function saveBuilderField(e, type, idx) {
+            e.preventDefault();
+            const fields = getFormFields();
+            const nf = {
+                id: document.getElementById('fb-label').value.toLowerCase().replace(/\s+/g,'_'),
+                label: document.getElementById('fb-label').value,
+                type: document.getElementById('fb-type').value,
+                options: document.getElementById('fb-options').value,
+                required: true, active: true
+            };
+            if(idx >= 0) { fields[type][idx] = { ...fields[type][idx], ...nf }; } 
+            else { fields[type].push(nf); }
+            saveFormFields(fields); closeModal(); renderApp();
+        }
+
+        function toggleFieldStatus(type, idx) {
+            const fields = getFormFields();
+            fields[type][idx].active = !fields[type][idx].active;
+            saveFormFields(fields); renderApp();
+        }
+
+        function formatCustomDate(iso) {
+            if(!iso) return '';
+            const d = new Date(iso);
+            return `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+        }
+
+        function renderTelegramSummaryView() {
+            const tickets = getTickets();
+            return `
+                <div class="max-w-5xl mx-auto space-y-6">
+                    <div class="flex justify-between items-center">
+                        <h2 class="text-2xl font-black text-slate-900 dark:text-white flex items-center gap-2"><i data-lucide="send" class="text-blue-500"></i> Resumen para Telegram</h2>
+                        <button onclick="switchView('dashboard')" class="px-4 py-2 bg-white dark:bg-[#0a110c] border border-slate-200 dark:border-[#122b1c] rounded-xl text-sm font-semibold shadow-sm hover:bg-slate-50 dark:hover:bg-[#122b1c] transition-colors">Volver</button>
+                    </div>
+
+                    <!-- Filtros Telegram -->
+                    <div class="flex flex-wrap gap-3 bg-white dark:bg-[#0a110c] p-4 rounded-xl border border-slate-200 dark:border-[#122b1c] shadow-sm">
+                        <div class="relative flex-1 min-w-[200px]">
+                            <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-2.5"></i>
+                            <input type="text" id="ts-search" onkeyup="filterTelegramList()" placeholder="Buscar Ticket o Nodo..." class="w-full bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] text-sm rounded-lg pl-9 pr-4 py-2 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-winet-500/50">
+                        </div>
+                        <select id="ts-status" onchange="filterTelegramList()" class="bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] text-sm rounded-lg px-3 py-2 text-slate-700 dark:text-white font-semibold focus:outline-none">
+                            <option value="all">Todos los Estatus</option>
+                            <option value="pendiente">Pendiente</option>
+                            <option value="en_proceso">En Proceso</option>
+                            <option value="finalizado">Finalizado</option>
+                        </select>
+                    </div>
+
+                    <div class="bg-white dark:bg-[#0a110c] rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm overflow-hidden p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="space-y-4 max-h-[60vh] overflow-y-auto pr-2" id="ts-ticket-list">
+                            <h3 class="font-bold text-slate-800 dark:text-white mb-2">Seleccione un Ticket</h3>
+                            ${tickets.map(t => `
+                                <div class="ts-ticket-item cursor-pointer p-4 rounded-xl border border-slate-200 dark:border-[#122b1c] hover:border-winet-500 dark:hover:border-winet-500 transition-all bg-slate-50 dark:bg-[#020503]" data-search="${t.id.toLowerCase()} ${t.nodo.toLowerCase()} ${t.ticketType.toLowerCase()}" data-status="${t.status}" onclick="document.getElementById('ts-preview').value = buildTelegramFormat(getTickets().find(x=>x.id==='${t.id}')); document.getElementById('ts-preview-id').innerText = '${t.id}';">
+                                    <div class="font-bold text-slate-800 dark:text-white flex justify-between items-center">
+                                        <span>${t.id}</span>
+                                        <span class="text-[10px] px-2 py-0.5 rounded-md bg-winet-100 text-winet-700 dark:bg-winet-900/30 dark:text-winet-400">${t.status.replace('_', ' ')}</span>
+                                    </div>
+                                    <div class="text-xs text-slate-500 dark:text-stone-400 mt-1">${t.nodo} • ${t.ticketType}</div>
+                                </div>
+                            `).join('') || '<p class="text-sm text-slate-500">No hay tickets registrados.</p>'}
+                        </div>
+                        <div class="flex flex-col h-full">
+                            <h3 class="font-bold text-slate-800 dark:text-white mb-2 flex justify-between items-center">
+                                <span>Vista Previa <span id="ts-preview-id" class="text-winet-600 dark:text-winet-500 ml-2 font-mono"></span></span>
+                                <button onclick="const el = document.getElementById('ts-preview'); el.select(); document.execCommand('copy'); showToast('Copiado al portapapeles');" class="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg font-bold flex items-center gap-1 transition-all">
+                                    <i data-lucide="copy" class="w-3.5 h-3.5"></i> Copiar
+                                </button>
+                            </h3>
+                            <textarea id="ts-preview" readonly placeholder="Seleccione un ticket de la lista para ver la plantilla aquí..." class="flex-1 w-full min-h-[400px] bg-slate-50 dark:bg-[#020503] text-slate-700 dark:text-winet-400 border border-slate-200 dark:border-[#122b1c] rounded-xl p-4 font-mono text-sm focus:outline-none resize-none"></textarea>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function filterTelegramList() {
+            const searchQ = document.getElementById('ts-search').value.toLowerCase();
+            const statusF = document.getElementById('ts-status').value;
+            const items = document.querySelectorAll('.ts-ticket-item');
+
+            items.forEach(item => {
+                const searchableText = item.getAttribute('data-search') || '';
+                const status = item.getAttribute('data-status') || '';
+                
+                const matchSearch = searchableText.includes(searchQ);
+                const matchStatus = statusF === 'all' || status === statusF;
+                
+                if (matchSearch && matchStatus) {
+                    item.style.display = 'block';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+        }
+
+        function renderDbManagerView() {
+            const catalogs = getCatalogs();
+            const users = getUsers();
+            return `
+                <div class="max-w-6xl mx-auto space-y-6">
+                    <div class="flex justify-between items-center">
+                        <h2 class="text-2xl font-black text-slate-900 dark:text-white flex items-center gap-2"><i data-lucide="database" class="text-winet-500"></i> Gestión de Base de Datos y Catálogos</h2>
+                        <div class="flex items-center gap-3">
+                            <label class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-bold shadow-sm transition-all cursor-pointer flex items-center gap-2">
+                                <i data-lucide="upload-cloud" class="w-4 h-4"></i> Importar Excel BD
+                                <input type="file" accept=".xlsx, .xls, .csv" class="hidden" onchange="importExcelDatabase(event)">
+                            </label>
+                            <button onclick="switchView('dashboard')" class="px-4 py-2 bg-white dark:bg-[#0a110c] border border-slate-200 dark:border-[#122b1c] rounded-xl text-sm font-semibold shadow-sm hover:bg-slate-50 dark:hover:bg-[#122b1c] transition-colors">Volver</button>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        ${renderCatalogList('Contratistas', 'contractors', catalogs.contractors)}
+                        ${renderCatalogList('Causas Raíz', 'causes', catalogs.causes)}
+                        ${renderCatalogList('Soluciones', 'solutions', catalogs.solutions)}
+                        <div class="bg-white dark:bg-[#0a110c] p-6 rounded-3xl border border-slate-200 dark:border-[#122b1c] shadow-sm">
+                            <div class="flex justify-between items-center mb-4 pb-2 border-b border-slate-100 dark:border-[#122b1c]">
+                                <h3 class="font-bold text-sm text-slate-800 dark:text-white">Usuarios Acreditados (${users.length})</h3>
+                                <button onclick="openUserModal()" class="text-xs bg-winet-600 hover:bg-winet-700 text-white px-3 py-1.5 rounded-lg font-bold flex items-center gap-1 transition-all"><i data-lucide="user-plus" class="w-3.5 h-3.5"></i> Nuevo</button>
+                            </div>
+                            <div class="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                                ${users.map(u => `
+                                    <div class="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-[#020503] border border-slate-200 dark:border-[#122b1c] text-sm group">
+                                        <div>
+                                            <span class="font-bold dark:text-white">${u.name}</span> 
+                                            <span class="text-[10px] px-1.5 py-0.5 ml-2 bg-slate-200 text-slate-700 dark:bg-[#122b1c] dark:text-stone-300 rounded uppercase font-bold">${u.role}</span>
+                                            <div class="text-xs text-winet-600 dark:text-winet-400 mt-1">${u.email}</div>
+                                        </div>
+                                        <div class="flex gap-1 opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button onclick="openUserModal('${u.id}')" class="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 rounded-md transition-colors"><i data-lucide="pencil" class="w-4 h-4"></i></button>
+                                            <button onclick="deleteUser('${u.id}')" class="p-1.5 text-rose-500 bg-rose-50 hover:bg-rose-100 dark:bg-rose-500/10 dark:hover:bg-rose-500/20 rounded-md transition-colors"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderCatalogList(title, key, list) {
+            return `
+                <div class="bg-white dark:bg-[#0a110c] p-6 rounded-3xl border border-slate-200 dark:border-[#122b1c] shadow-sm flex flex-col max-h-[400px]">
+                    <div class="flex justify-between items-center mb-4 pb-2 border-b border-slate-100 dark:border-[#122b1c]">
+                        <h3 class="font-bold text-sm text-slate-800 dark:text-white flex items-center gap-2">
+                            ${title} <span class="bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-stone-400 text-xs px-2 py-0.5 rounded-full">${list.length}</span>
+                        </h3>
+                        <button onclick="addCatalogItem('${key}')" class="text-xs bg-winet-600 hover:bg-winet-700 transition-colors text-white px-3 py-1.5 rounded-lg font-bold flex items-center gap-1"><i data-lucide="plus" class="w-3.5 h-3.5"></i> Añadir</button>
+                    </div>
+                    <div class="space-y-2 overflow-y-auto pr-2 flex-1">
+                        ${list.map((item, idx) => `
+                            <div class="flex items-center justify-between p-3 rounded-xl bg-slate-50 hover:bg-slate-100 dark:bg-[#020503] dark:hover:bg-[#0a110c] border border-slate-200 dark:border-[#122b1c] transition-colors text-sm dark:text-stone-300">
+                                <span>${typeof item === 'string' ? item : `${item.name} (${item.unit})`}</span>
+                                <button onclick="removeCatalogItem('${key}', ${idx})" class="text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-500/10 p-1.5 rounded transition-all"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function addCatalogItem(key) {
+            // Reemplazo del prompt por un modal personalizado (Glassmorphic)
+            openModal(`
+                <div class="bg-white dark:bg-[#0a110c] rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-[#122b1c]">
+                    <h3 class="font-bold text-slate-800 dark:text-white mb-4">Añadir Nuevo Valor</h3>
+                    <input type="text" id="new-cat-val" required placeholder="Escriba aquí..." class="w-full bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] rounded-xl px-4 py-2.5 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-winet-500 mb-4">
+                    <div class="flex justify-end gap-2">
+                        <button onclick="closeModal()" class="px-4 py-2 text-sm font-semibold text-slate-600 dark:text-slate-400">Cancelar</button>
+                        <button onclick="saveNewCatalogItem('${key}')" class="px-5 py-2 bg-winet-600 text-white rounded-xl text-sm font-bold">Guardar</button>
+                    </div>
+                </div>
+            `);
+        }
+
+        function saveNewCatalogItem(key) {
+            const val = document.getElementById('new-cat-val').value.trim();
+            if(!val) return;
+            const catalogs = getCatalogs();
+            if(key === 'materials') catalogs[key].push({name: val, unit: 'Unidades'});
+            else catalogs[key].push(val);
+            saveCatalogs(catalogs);
+            closeModal();
+            renderApp();
+            showToast('Elemento añadido al catálogo', 'success');
+        }
+
+        function removeCatalogItem(key, idx) {
+            const catalogs = getCatalogs();
+            catalogs[key].splice(idx, 1);
+            saveCatalogs(catalogs);
+            renderApp();
+            showToast('Elemento eliminado', 'success');
+        }
+
+        function openUserModal(userId = null) {
+            const users = getUsers();
+            const user = userId ? users.find(u => u.id === userId) : { id: `u${Date.now()}`, name: '', email: '', pass: '', role: 'supervisor' };
+            const isNew = !userId;
+            
+            openModal(`
+                <div class="bg-white dark:bg-[#0a110c] rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-[#122b1c]">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="font-bold text-slate-800 dark:text-white">${isNew ? 'Nuevo Usuario' : 'Editar Usuario'}</h3>
+                        <button onclick="closeModal()" class="text-slate-400 hover:text-slate-800 dark:hover:text-white"><i data-lucide="x"></i></button>
+                    </div>
+                    <form onsubmit="saveUser(event, '${user.id}', ${isNew})" class="space-y-4">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 mb-1">Nombre Completo</label>
+                            <input type="text" id="u-name" required value="${user.name}" class="w-full bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] rounded-xl px-4 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-winet-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 mb-1">Correo Electrónico</label>
+                            <input type="email" id="u-email" required value="${user.email}" class="w-full bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] rounded-xl px-4 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-winet-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 mb-1">Contraseña</label>
+                            <input type="text" id="u-pass" required value="${user.pass}" class="w-full bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] rounded-xl px-4 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-winet-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 mb-1">Rol</label>
+                            <select id="u-role" class="w-full bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] rounded-xl px-4 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-winet-500">
+                                <option value="supervisor" ${user.role === 'supervisor' ? 'selected' : ''}>Supervisor</option>
+                                <option value="noc" ${user.role === 'noc' ? 'selected' : ''}>NOC / Operador</option>
+                                <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Administrador</option>
+                            </select>
+                        </div>
+                        <div class="flex justify-end gap-2 pt-2">
+                            <button type="button" onclick="closeModal()" class="px-5 py-2 text-slate-600 dark:text-slate-400 rounded-xl text-sm font-bold">Cancelar</button>
+                            <button type="submit" class="px-5 py-2 bg-winet-600 text-white rounded-xl text-sm font-bold">Guardar</button>
+                        </div>
+                    </form>
+                </div>
+            `);
+        }
+
+        function saveUser(e, id, isNew) {
+            e.preventDefault();
+            const users = getUsers();
+            const newUser = {
+                id: id,
+                name: document.getElementById('u-name').value.trim(),
+                email: document.getElementById('u-email').value.trim(),
+                pass: document.getElementById('u-pass').value.trim(),
+                role: document.getElementById('u-role').value
+            };
+
+            if (isNew) {
+                users.push(newUser);
+            } else {
+                const idx = users.findIndex(u => u.id === id);
+                if (idx > -1) users[idx] = newUser;
+            }
+
+            saveUsers(users);
+            closeModal();
+            renderApp();
+            showToast('Usuario guardado exitosamente', 'success');
+        }
+
+        function deleteUser(id) {
+            openModal(`
+                <div class="bg-white dark:bg-[#0a110c] rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-[#122b1c] text-center">
+                    <div class="w-12 h-12 bg-rose-100 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <i data-lucide="alert-triangle" class="w-6 h-6"></i>
+                    </div>
+                    <h3 class="font-bold text-slate-800 dark:text-white mb-2">Eliminar Usuario</h3>
+                    <p class="text-sm text-slate-500 dark:text-slate-400 mb-6">¿Está seguro de que desea eliminar este usuario? Esta acción no se puede deshacer.</p>
+                    <div class="flex justify-center gap-3">
+                        <button onclick="closeModal()" class="px-5 py-2 text-slate-600 dark:text-slate-400 font-bold rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-[#122b1c] dark:hover:bg-slate-800 transition-colors">Cancelar</button>
+                        <button onclick="confirmDeleteUser('${id}')" class="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl transition-colors">Eliminar</button>
+                    </div>
+                </div>
+            `);
+        }
+
+        function confirmDeleteUser(id) {
+            let users = getUsers();
+            users = users.filter(u => u.id !== id);
+            saveUsers(users);
+            closeModal();
+            renderApp();
+            showToast('Usuario eliminado', 'success');
+        }
+
+        function exportToCSV() {
+            const tickets = getTickets();
+            if(tickets.length === 0) return showToast('No hay datos para exportar', 'error');
+            const headers = ['ID Ticket', 'Fecha Creación', 'Tipo Avería', 'Categoría', 'Área Reporta', 'Estado', 'Clientes Afectados', 'Nodo', 'Distrito', 'Supervisor', 'Contratista', 'Brigada', 'Latitud', 'Longitud'];
+            const rows = tickets.map(t => [t.id, t.createdAt, t.ticketType, t.category, t.reportArea, t.status, t.affectedClients, t.nodo, t.distrito, t.supervisor || '', t.contractor || '', t.brigada || '', t.coords?.lat || '', t.coords?.lng || '']);
+            const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows.map(e => e.map(String).map(s=>`"${s.replace(/"/g, '""')}"`).join(','))].join('\n');
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", `WINET_PEXT_Reporte_${new Date().toISOString().split('T')[0]}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            showToast('CSV Descargado exitosamente', 'success');
+        }
+
+        function openClosureModal(id) {
+            const catalogs = getCatalogs();
+            openModal(`
+                <div class="bg-white dark:bg-[#0a110c] rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-[#122b1c] max-h-[90vh] overflow-y-auto">
+                    <div class="flex justify-between items-center mb-5 pb-3 border-b border-slate-100 dark:border-[#122b1c]">
+                        <h3 class="text-lg font-bold text-slate-800 dark:text-white">Cerrar Avería • <span class="text-winet-600 dark:text-winet-500 font-mono">${id}</span></h3>
+                        <button onclick="closeModal()" class="text-slate-400 hover:text-slate-800 dark:hover:text-white"><i data-lucide="x"></i></button>
+                    </div>
+                    <form onsubmit="handleClosure(event, '${id}')" class="space-y-4">
+                        <div class="grid grid-cols-2 gap-3">
+                            ${renderInputGroup('Hora Inicio Trabajo', 'cl-start', 'time')}
+                            ${renderInputGroup('Hora Fin Trabajo', 'cl-end', 'time')}
+                        </div>
+                        ${renderInputGroup('Causa Raíz', 'cl-cause', 'select', catalogs.causes)}
+                        ${renderInputGroup('Solución Aplicada', 'cl-sol', 'select', catalogs.solutions)}
+                        
+                        <div>
+                            <label class="block text-[11px] font-bold text-slate-500 dark:text-stone-400 uppercase tracking-wider mb-1">GIS / Catastro (Actualización Opcional)</label>
+                            <input type="text" id="cl-gis" placeholder="Ej. Trazado KMZ actualizado, empalmes registrados..." class="w-full bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] rounded-xl px-4 py-2.5 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-winet-500/50 focus:border-winet-500 transition-all font-medium">
+                        </div>
+
+                        <div class="p-4 bg-slate-50 dark:bg-[#020503] rounded-xl border border-slate-200 dark:border-[#122b1c] space-y-3">
+                            <label class="block text-xs font-bold text-slate-700 dark:text-stone-300 uppercase flex justify-between items-center">
+                                <span>Materiales Utilizados</span>
+                                <span class="text-[10px] bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 px-2 py-0.5 rounded">Opcional</span>
+                            </label>
+                        <div class="pt-4 mt-4 border-t border-slate-100 dark:border-[#122b1c] flex justify-end gap-3">
+                            <button type="button" onclick="closeModal()" class="px-5 py-2.5 text-sm font-semibold text-slate-600 dark:text-slate-400">Cancelar</button>
+                            <button type="submit" class="px-6 py-2.5 bg-winet-600 hover:bg-winet-700 text-white rounded-xl font-bold text-sm flex items-center gap-2 transition-all">
+                                <i data-lucide="check-circle-2" class="w-4 h-4"></i> Finalizar Ticket
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            `);
+        }
+
+        function handleClosure(e, id) {
+            e.preventDefault();
+            const tickets = getTickets();
+            const t = tickets.find(x => x.id === id);
+            t.status = 'finalizado';
+            t.closureData = {
+                startTime: document.getElementById('cl-start').value,
+                endTime: document.getElementById('cl-end').value,
+                cause: document.getElementById('cl-cause').value,
+                solution: document.getElementById('cl-sol').value,
+                closedAt: new Date().toISOString()
+            };
+            saveTickets(tickets); 
+            showToast(`Ticket ${id} cerrado con éxito.`, 'success'); 
+            closeModal(); 
+            renderApp();
+        }
+
+        function viewClosureDetails(id) {
+            const t = getTickets().find(x => x.id === id);
+            if(!t || !t.closureData) return;
+            openModal(`
+                <div class="bg-white dark:bg-[#0a110c] rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-[#122b1c]">
+                    <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-100 dark:border-[#122b1c]">
+                        <h3 class="font-bold text-slate-800 dark:text-white flex items-center gap-2"><i data-lucide="file-check" class="text-winet-500 w-4 h-4"></i> Detalles de Cierre</h3>
+                        <button onclick="closeModal()" class="text-slate-400 hover:text-slate-800 dark:hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+                    </div>
+                    <div class="space-y-4 text-sm text-slate-700 dark:text-stone-300">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div><span class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Inicio Trabajo</span> <span class="font-mono font-bold">${t.closureData.startTime}</span></div>
+                            <div><span class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Fin Trabajo</span> <span class="font-mono font-bold">${t.closureData.endTime}</span></div>
+                        </div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Causa Raíz</span>
+                            <div class="bg-slate-50 dark:bg-[#020503] p-2 rounded-lg border border-slate-100 dark:border-[#122b1c] text-xs">${t.closureData.cause}</div>
+                        </div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Solución Aplicada</span>
+                            <div class="bg-slate-50 dark:bg-[#020503] p-2 rounded-lg border border-slate-100 dark:border-[#122b1c] text-xs">${t.closureData.solution}</div>
+                        </div>
+                        <div class="pt-3 border-t border-slate-100 dark:border-[#122b1c]">
+                            <span class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Fecha Registro Sistema</span>
+                            <span class="font-mono text-xs text-slate-500">${formatCustomDate(t.closureData.closedAt)}</span>
+                        </div>
+                    </div>
+                </div>
+            `);
+        }
+
+        // --- FUNCIONALIDAD DE COLAS Y ASIGNACIÓN (KANBAN) ---
+        function renderQueuesView() {
+            const tickets = getTickets();
+            const users = getUsers();
+            const supervisors = [...new Set([
+                ...users.filter(u => u.role !== 'noc' && u.role !== 'admin').map(u => u.name),
+                ...tickets.map(t => t.supervisor).filter(Boolean)
+            ])].sort();
+
+            const columns = ['Sin Asignar', ...supervisors];
+
+            // Analítica rápida de la cola actual
+            const activeTickets = tickets.filter(t => t.status !== 'finalizado');
+            let totalElapsedMs = 0;
+            let maxElapsedMs = 0;
+            activeTickets.forEach(t => {
+                const elapsed = getElapsedTime(t.createdAt).ms;
+                totalElapsedMs += elapsed;
+                if (elapsed > maxElapsedMs) maxElapsedMs = elapsed;
+            });
+            const avgElapsed = activeTickets.length > 0 ? getElapsedTime(new Date(Date.now() - (totalElapsedMs / activeTickets.length)).toISOString()).text : '0h 0m';
+            const maxElapsed = getElapsedTime(new Date(Date.now() - maxElapsedMs).toISOString()).text;
+
+            return `
+                <div class="h-[calc(100vh-140px)] flex flex-col space-y-4">
+                    <div class="flex justify-between items-start lg:items-center flex-col lg:flex-row gap-4">
+                        <div>
+                            <h2 class="text-2xl font-black text-slate-900 dark:text-white flex items-center gap-2">
+                                <i data-lucide="kanban" class="text-winet-500"></i> Gestión de Colas y Asignación
+                            </h2>
+                            <p class="text-sm text-slate-500 dark:text-stone-400 mt-1">Tabla de gestión horizontal por supervisor. Cierre o reasigne tickets directamente desde la lista.</p>
+                        </div>
+                        <div class="flex gap-4">
+                            <div class="bg-white dark:bg-[#0a110c] px-4 py-2 rounded-xl border border-slate-200 dark:border-[#122b1c] shadow-sm flex flex-col items-center">
+                                <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Tickets Activos</span>
+                                <span class="text-lg font-black text-slate-800 dark:text-white">${activeTickets.length}</span>
+                            </div>
+                            <div class="bg-white dark:bg-[#0a110c] px-4 py-2 rounded-xl border border-slate-200 dark:border-[#122b1c] shadow-sm flex flex-col items-center">
+                                <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Tiempo Promedio</span>
+                                <span class="text-lg font-black text-amber-600 dark:text-amber-500">${avgElapsed}</span>
+                            </div>
+                            <div class="bg-white dark:bg-[#0a110c] px-4 py-2 rounded-xl border border-slate-200 dark:border-[#122b1c] shadow-sm flex flex-col items-center hidden sm:flex">
+                                <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Tiempo Máximo</span>
+                                <span class="text-lg font-black text-rose-600 dark:text-rose-500">${maxElapsed}</span>
+                            </div>
+                        </div>
+                        <button onclick="switchView('dashboard')" class="px-4 py-2 bg-white dark:bg-[#0a110c] border border-slate-200 dark:border-[#122b1c] rounded-xl text-sm font-semibold shadow-sm hover:bg-slate-50 dark:hover:bg-[#122b1c] transition-colors">Volver</button>
+                    </div>
+                    
+                    <div class="flex-1 flex gap-5 overflow-x-auto pb-4 custom-scrollbar">
+                        ${columns.map(sup => {
+                            const supTickets = tickets.filter(t => (sup === 'Sin Asignar' && !t.supervisor) || t.supervisor === sup);
+                            return `
+                                <div class="min-w-[400px] w-[450px] max-h-full flex flex-col bg-slate-50 dark:bg-[#050a07] rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm">
+                                    <div class="p-4 border-b border-slate-200 dark:border-[#122b1c] bg-white dark:bg-[#0a110c] rounded-t-2xl flex justify-between items-center sticky top-0 z-10">
+                                        <h3 class="font-bold text-slate-800 dark:text-white text-sm flex items-center gap-2">
+                                            <i data-lucide="${sup === 'Sin Asignar' ? 'inbox' : 'user'}" class="w-4 h-4 ${sup === 'Sin Asignar' ? 'text-amber-500' : 'text-winet-500'}"></i> ${sup}
+                                        </h3>
+                                        <span class="bg-slate-200 text-slate-700 dark:bg-[#122b1c] dark:text-stone-300 text-xs px-2.5 py-1 rounded-full font-bold">${supTickets.length}</span>
+                                    </div>
+                                    <div class="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
+                                        ${supTickets.length > 0 
+                                            ? supTickets.map(t => renderQueueCard(t, supervisors)).join('') 
+                                            : `<div class="text-center text-xs text-slate-400 dark:text-stone-500 py-6 border-2 border-dashed border-slate-200 dark:border-[#122b1c] rounded-xl">No hay tickets en esta bandeja</div>`
+                                        }
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderQueueCard(t, supervisors) {
+            let typeColor = 'border-l-emerald-500';
+            let badgeBg = 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400';
+            
+            if (t.ticketType === 'Tickets de Backbone') {
+                typeColor = 'border-l-indigo-500';
+                badgeBg = 'bg-indigo-100 text-indigo-800 dark:bg-indigo-500/10 dark:text-indigo-400';
+            } else if (t.ticketType === 'Tickets de Requerimiento') {
+                typeColor = 'border-l-purple-500';
+                badgeBg = 'bg-purple-100 text-purple-800 dark:bg-purple-500/10 dark:text-purple-400';
+            }
+
+            const elapsedInfo = t.status === 'finalizado' ? getElapsedTime(t.createdAt, t.closureData.closedAt) : getElapsedTime(t.createdAt);
+            const isCritical = t.status !== 'finalizado' && elapsedInfo.ms > (4 * 60 * 60 * 1000); // Resaltar si pasa de 4 horas
+            const timeColorClass = t.status === 'finalizado' ? 'text-winet-600 dark:text-winet-500' : (isCritical ? 'text-rose-600 dark:text-rose-500' : 'text-amber-600 dark:text-amber-500');
+
+            return `
+                <div class="bg-white dark:bg-[#0a110c] p-4 rounded-xl border border-slate-200 dark:border-[#122b1c] shadow-sm hover:shadow-md transition-shadow border-l-4 ${typeColor} flex flex-col gap-3 relative group">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <span class="font-mono font-bold text-slate-900 dark:text-white text-sm">${t.id}</span>
+                            <div class="text-xs font-semibold text-slate-700 dark:text-stone-300 line-clamp-1 mt-0.5">${t.nodo} • ${t.distrito}</div>
+                        </div>
+                        <div class="text-[10px] inline-block px-1.5 py-0.5 rounded font-bold w-max ${badgeBg}">${t.ticketType}</div>
+                    </div>
+                    
+                    <div class="flex items-center gap-1.5 text-[11px] font-bold ${timeColorClass} bg-slate-50 dark:bg-[#020503] p-1.5 rounded-lg border border-slate-100 dark:border-[#122b1c] w-fit">
+                        <i data-lucide="timer" class="w-3.5 h-3.5"></i> Transcurrido: ${elapsedInfo.text}
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2 mt-1">
+                        <div>
+                            <label class="text-[9px] font-bold text-slate-500 uppercase">Supervisor</label>
+                            <select onchange="updateTicketSupervisor('${t.id}', this.value)" class="w-full text-[11px] font-semibold bg-slate-50 dark:bg-[#020503] border border-slate-200 dark:border-[#122b1c] rounded px-1.5 py-1 text-slate-700 dark:text-white focus:outline-none focus:border-winet-500 transition-colors">
+                                <option value="">Sin Asignar</option>
+                                ${supervisors.map(s => `<option value="${s}" ${t.supervisor === s ? 'selected' : ''}>${s}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-[9px] font-bold text-slate-500 uppercase">Estatus Actual</label>
+                            <select onchange="updateTicketStatus('${t.id}', this.value)" class="w-full text-[11px] font-semibold bg-slate-50 dark:bg-[#020503] border border-slate-200 dark:border-[#122b1c] rounded px-1.5 py-1 text-slate-700 dark:text-white focus:outline-none focus:border-winet-500 transition-colors">
+                                <option value="pendiente" ${t.status==='pendiente'?'selected':''}>Pendiente</option>
+                                <option value="en_proceso" ${t.status==='en_proceso'?'selected':''}>En Proceso</option>
+                                <option value="finalizado" ${t.status==='finalizado'?'selected':''}>Finalizado</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-2 mt-2 pt-2 border-t border-slate-100 dark:border-[#122b1c]">
+                        ${t.status !== 'finalizado' ? `
+                            <button onclick="openClosureModal('${t.id}')" class="flex-1 py-1.5 bg-winet-600 hover:bg-winet-700 text-white rounded-lg text-xs font-bold transition-colors flex justify-center items-center gap-1">
+                                <i data-lucide="check-square" class="w-3.5 h-3.5"></i> Cerrar Ticket
+                            </button>
+                        ` : `
+                            <button onclick="viewClosureDetails('${t.id}')" class="flex-1 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-[#122b1c] dark:hover:bg-slate-800 text-slate-700 dark:text-stone-300 rounded-lg text-xs font-bold transition-colors flex justify-center items-center gap-1">
+                                <i data-lucide="eye" class="w-3.5 h-3.5"></i> Ver Cierre
+                            </button>
+                        `}
+                    </div>
+
+                    <div class="absolute bottom-[3.5rem] right-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onclick="quickTelegramModal('${t.id}')" class="p-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 rounded-md" title="Enviar por Telegram">
+                            <i data-lucide="send" class="w-3.5 h-3.5"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+        function openClosureModal(id) {
+            const catalogs = getCatalogs();
+            tempMaterials = []; // Limpiar materiales temporales al abrir
+            
+            openModal(`
+                <div class="bg-white dark:bg-[#0a110c] rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 dark:border-[#122b1c] max-h-[95vh] flex flex-col">
+                    <div class="flex justify-between items-center mb-5 pb-3 border-b border-slate-100 dark:border-[#122b1c] flex-shrink-0">
+                        <h3 class="text-lg font-bold text-slate-800 dark:text-white">Cerrar Avería • <span class="text-winet-600 dark:text-winet-500 font-mono">${id}</span></h3>
+                        <button onclick="closeModal()" class="text-slate-400 hover:text-slate-800 dark:hover:text-white"><i data-lucide="x"></i></button>
+                    </div>
+                    <form onsubmit="handleClosure(event, '${id}')" class="space-y-4 overflow-y-auto custom-scrollbar pr-2 pb-2">
+                        <div class="grid grid-cols-2 gap-3">
+                            ${renderInputGroup('Hora Inicio Trabajo', 'cl-start', 'time')}
+                            ${renderInputGroup('Hora Fin Trabajo', 'cl-end', 'time')}
+                        </div>
+                        ${renderInputGroup('Causa Raíz', 'cl-cause', 'select', catalogs.causes)}
+                        ${renderInputGroup('Solución Aplicada', 'cl-sol', 'select', catalogs.solutions)}
+                        
+                        <div class="p-4 bg-slate-50 dark:bg-[#020503] rounded-xl border border-slate-200 dark:border-[#122b1c] space-y-3">
+                            <label class="block text-xs font-bold text-slate-700 dark:text-stone-300 uppercase">Materiales Utilizados</label>
+                            
+                            <div class="flex gap-2">
+                                <select id="mat-select" class="flex-1 bg-white dark:bg-[#0a110c] border border-slate-300 dark:border-[#122b1c] rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none">
+                                    <option value="">Seleccione Material...</option>
+                                    ${catalogs.materials.map(m => `<option value="${m.name}">${m.name} (${m.unit})</option>`).join('')}
+                                </select>
+                                <input type="number" id="mat-qty" placeholder="Cant." min="1" class="w-20 bg-white dark:bg-[#0a110c] border border-slate-300 dark:border-[#122b1c] rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none">
+                                <button type="button" onclick="addClosureMaterial()" class="px-3 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-[#122b1c] dark:hover:bg-[#1a3d28] text-slate-800 dark:text-white rounded-lg font-bold text-sm transition-colors">+</button>
+                            </div>
+                            
+                            <div id="closure-materials-list" class="space-y-2 mt-3 max-h-[150px] overflow-y-auto">
+                                <p class="text-xs text-slate-500 italic">No hay materiales registrados aún.</p>
+                            </div>
+                        </div>
+
+                        <div class="pt-4 mt-4 border-t border-slate-100 dark:border-[#122b1c] flex justify-end gap-3 flex-shrink-0">
+                            <button type="button" onclick="closeModal()" class="px-5 py-2.5 text-sm font-semibold text-slate-600 dark:text-slate-400">Cancelar</button>
+                            <button type="submit" class="px-6 py-2.5 bg-winet-600 hover:bg-winet-700 text-white rounded-xl font-bold text-sm flex items-center gap-2 transition-all">
+                                <i data-lucide="check-circle-2" class="w-4 h-4"></i> Finalizar Ticket
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            `);
+        }
+
+        function addClosureMaterial() {
+            const select = document.getElementById('mat-select');
+            const qtyInput = document.getElementById('mat-qty');
+            const name = select.value;
+            const qty = parseInt(qtyInput.value);
+
+            if (!name || isNaN(qty) || qty <= 0) return showToast('Seleccione un material y cantidad válida', 'error');
+
+            const existingIdx = tempMaterials.findIndex(m => m.name === name);
+            if (existingIdx > -1) {
+                tempMaterials[existingIdx].qty += qty;
+            } else {
+                tempMaterials.push({ name, qty });
+            }
+
+            select.value = '';
+            qtyInput.value = '';
+            renderClosureMaterialsList();
+        }
+
+        function removeClosureMaterial(idx) {
+            tempMaterials.splice(idx, 1);
+            renderClosureMaterialsList();
+        }
+
+        function renderClosureMaterialsList() {
+            const listEl = document.getElementById('closure-materials-list');
+            if (tempMaterials.length === 0) {
+                listEl.innerHTML = '<p class="text-xs text-slate-500 italic">No hay materiales registrados aún.</p>';
+                return;
+            }
+
+            listEl.innerHTML = tempMaterials.map((m, idx) => `
+                <div class="flex items-center justify-between bg-white dark:bg-[#0a110c] p-2 rounded border border-slate-200 dark:border-[#122b1c] text-sm">
+                    <span class="text-slate-700 dark:text-stone-300"><strong class="text-slate-900 dark:text-white">${m.qty}x</strong> ${m.name}</span>
+                    <button type="button" onclick="removeClosureMaterial(${idx})" class="text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 p-1 rounded transition-colors"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
+                </div>
+            `).join('');
+            lucide.createIcons();
+        }
+
+        function handleClosure(e, id) {
+            e.preventDefault();
+            const tickets = getTickets();
+            const t = tickets.find(x => x.id === id);
+            t.status = 'finalizado';
+            t.closureData = {
+                startTime: document.getElementById('cl-start').value,
+                endTime: document.getElementById('cl-end').value,
+                cause: document.getElementById('cl-cause').value,
+                solution: document.getElementById('cl-sol').value,
+                gisCatastro: document.getElementById('cl-gis').value.trim(),
+                materials: [...tempMaterials],
+                closedAt: new Date().toISOString()
+            };
+            saveTickets(tickets); 
+            showToast(`Ticket ${id} cerrado con éxito.`, 'success'); 
+            closeModal(); 
+            renderApp();
+        }
+
+        function viewClosureDetails(id) {
+            const t = getTickets().find(x => x.id === id);
+            if(!t || !t.closureData) return;
+            openModal(`
+                <div class="bg-white dark:bg-[#0a110c] rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-[#122b1c]">
+                    <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-100 dark:border-[#122b1c]">
+                        <h3 class="font-bold text-slate-800 dark:text-white flex items-center gap-2"><i data-lucide="file-check" class="text-winet-500 w-4 h-4"></i> Detalles de Cierre</h3>
+                        <button onclick="closeModal()" class="text-slate-400 hover:text-slate-800 dark:hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+                    </div>
+                    <div class="space-y-4 text-sm text-slate-700 dark:text-stone-300 max-h-[70vh] overflow-y-auto pr-2 custom-scrollbar">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div><span class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Inicio Trabajo</span> <span class="font-mono font-bold">${t.closureData.startTime}</span></div>
+                            <div><span class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Fin Trabajo</span> <span class="font-mono font-bold">${t.closureData.endTime}</span></div>
+                        </div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Causa Raíz</span>
+                            <div class="bg-slate-50 dark:bg-[#020503] p-2 rounded-lg border border-slate-100 dark:border-[#122b1c] text-xs">${t.closureData.cause}</div>
+                        </div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Solución Aplicada</span>
+                            <div class="bg-slate-50 dark:bg-[#020503] p-2 rounded-lg border border-slate-100 dark:border-[#122b1c] text-xs">${t.closureData.solution}</div>
+                        </div>
+                        ${t.closureData.gisCatastro ? `
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-500 uppercase block mb-1">GIS / Catastro</span>
+                            <div class="bg-slate-50 dark:bg-[#020503] p-2 rounded-lg border border-slate-100 dark:border-[#122b1c] text-xs">${t.closureData.gisCatastro}</div>
+                        </div>` : ''}
+                        ${t.closureData.materials && t.closureData.materials.length > 0 ? `
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Materiales Usados</span>
+                            <div class="bg-slate-50 dark:bg-[#020503] p-2 rounded-lg border border-slate-100 dark:border-[#122b1c] space-y-1">
+                                ${t.closureData.materials.map(m => `<div class="text-xs flex justify-between border-b border-slate-200 dark:border-slate-800 pb-1 last:border-0 last:pb-0"><span class="font-bold text-slate-900 dark:text-white">${m.qty}x</span> <span class="text-right flex-1 ml-2 truncate">${m.name}</span></div>`).join('')}
+                            </div>
+                        </div>` : ''}
+                        <div class="pt-3 border-t border-slate-100 dark:border-[#122b1c]">
+                            <span class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Fecha Registro Sistema</span>
+                            <span class="font-mono text-xs text-slate-500">${formatCustomDate(t.closureData.closedAt)}</span>
+                        </div>
+                    </div>
+                </div>
+            `);
+        }
+
+        // --- IMPORTACIÓN INTELIGENTE DE EXCEL (SheetJS) ---
+        function importExcelDatabase(e) {
+            const file = e.target.files[0];
+            if(!file) return;
+            const reader = new FileReader();
+            
+            showToast('Procesando archivo Excel, por favor espere...', 'success');
+
+            reader.onload = function(evt) {
+                try {
+                    const data = new Uint8Array(evt.target.result);
+                    const workbook = XLSX.read(data, {type: 'array'});
+                    const firstSheet = workbook.SheetNames[0];
+                    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheet]);
+                    
+                    if(rows.length === 0) return showToast('El archivo Excel no contiene datos (está vacío).', 'error');
+
+                    const tickets = getTickets();
+                    let importedCount = 0;
+
+                    rows.forEach(row => {
+                        // Función helper para encontrar columnas independientemente de mayúsculas o espacios
+                        const getVal = (keywords) => {
+                            const key = Object.keys(row).find(k => keywords.some(kw => k.toLowerCase().includes(kw)));
+                            return key ? row[key] : '';
+                        };
+
+                        const newId = getVal(['id', 'ticket', 'codigo', 'ticketid']) || `AVE-${Math.floor(100000 + Math.random() * 900000)}`;
+                        
+                        // Evitar duplicidad
+                        if(tickets.find(t => t.id === String(newId))) return;
+
+                        let lat = parseFloat(getVal(['latitud', 'lat', 'y']));
+                        let lng = parseFloat(getVal(['longitud', 'lng', 'lon', 'x']));
+                        
+                        const t = {
+                            id: String(newId),
+                            createdAt: getVal(['fecha', 'creacion', 'date', 'inicio']) || new Date().toISOString(),
+                            ticketType: getVal(['tipo', 'motivo', 'averia']) || 'Avería Clientes Loss',
+                            category: getVal(['categoria', 'cat']) || 'AVERIA',
+                            reportArea: getVal(['reporta', 'area', 'origen']) || 'Calidad Operativa',
+                            affectedClients: parseInt(getVal(['afectados', 'clientes'])) || 1,
+                            elementType: getVal(['elemento', 'tipo_elemento']) || 'CAJA CTO',
+                            elementCode: getVal(['codigo_elemento', 'code', 'codigo']) || 'S/N',
+                            coords: { lat: isNaN(lat) ? -12.0464 : lat, lng: isNaN(lng) ? -77.0428 : lng },
+                            nodo: getVal(['nodo', 'olt']) || 'SIN NODO',
+                            project: getVal(['proyecto', 'project', 'troncal']) || 'N/A',
+                            distrito: getVal(['distrito', 'ciudad']) || 'LIMA',
+                            zone: getVal(['zona', 'region', 'area']) || 'LIMA',
+                            details: getVal(['detalles', 'observacion', 'comentario']) || 'Importado desde archivo maestro Excel.',
+                            status: getVal(['estado', 'estatus', 'status'])?.toLowerCase() === 'finalizado' ? 'finalizado' : 'pendiente',
+                            supervisor: getVal(['supervisor', 'encargado', 'lider']) || null,
+                            contractor: getVal(['contratista', 'empresa']) || null,
+                            brigada: getVal(['brigada', 'cuadrilla', 'tecnico']) || null,
+                            closureData: null
+                        };
+
+                        if (t.status === 'finalizado') {
+                            t.closureData = {
+                                startTime: getVal(['hora_inicio', 'inicio_trabajo']) || '08:00',
+                                endTime: getVal(['hora_fin', 'fin_trabajo']) || '10:00',
+                                cause: getVal(['causa', 'raiz', 'falla']) || 'Causa no especificada',
+                                solution: getVal(['solucion', 'accion', 'reparacion']) || 'Solución no especificada',
+                                closedAt: t.createdAt
+                            };
+                        }
+
+                        tickets.push(t);
+                        importedCount++;
+                    });
+
+                    saveTickets(tickets);
+                    showToast(`Éxito: ${importedCount} Tickets importados a la base de datos maestra.`, 'success');
+                    renderApp();
+                    
+                } catch(err) {
+                    console.error("Error importando Excel:", err);
+                    showToast('Ocurrió un error al leer la estructura del archivo Excel.', 'error');
+                }
+            };
+            reader.readAsArrayBuffer(file);
+            e.target.value = ''; // Limpiar el input para permitir volver a subir el mismo archivo si es necesario
+        }
+
+        // --- MÓDULO DE LIQUIDACIÓN DE MATERIALES ---
+        function renderLiquidationView() {
+            const tickets = getTickets().filter(t => t.status === 'finalizado' && t.closureData && t.closureData.materials && t.closureData.materials.length > 0);
+            const catalogs = getCatalogs();
+            const filterM = document.getElementById('liq-month')?.value || 'all';
+            const filterY = document.getElementById('liq-year')?.value || new Date().getFullYear().toString();
+            const filterC = document.getElementById('liq-contractor')?.value || 'all';
+
+            // Filtrar tickets por mes, año y contratista
+            const filteredTickets = tickets.filter(t => {
+                if(!t.closureData.closedAt) return false;
+                const d = new Date(t.closureData.closedAt);
+                const matchM = filterM === 'all' || d.getMonth().toString() === filterM;
+                const matchY = filterY === 'all' || d.getFullYear().toString() === filterY;
+                const matchC = filterC === 'all' || t.contractor === filterC;
+                return matchM && matchY && matchC;
+            });
+
+            // Agrupar materiales (Tabla Dinámica)
+            const materialSummary = {};
+            filteredTickets.forEach(t => {
+                t.closureData.materials.forEach(m => {
+                    if (!materialSummary[m.name]) materialSummary[m.name] = 0;
+                    materialSummary[m.name] += parseInt(m.qty);
+                });
+            });
+
+            const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+
+            return `
+                <div class="max-w-6xl mx-auto space-y-6">
+                    <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center bg-white dark:bg-[#0a110c] p-5 rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm gap-4">
+                        <div>
+                            <h2 class="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
+                                <i data-lucide="calculator" class="text-winet-500"></i> Liquidación de Materiales
+                            </h2>
+                            <p class="text-xs text-slate-500 dark:text-stone-400 mt-1">Tabla dinámica de consolidación por contratista y periodo.</p>
+                        </div>
+                        <div class="flex flex-wrap gap-3">
+                            <select id="liq-contractor" onchange="renderApp()" class="bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] rounded-lg px-4 py-2 text-sm font-semibold text-slate-800 dark:text-white focus:outline-none focus:border-winet-500">
+                                <option value="all">Todos los Contratistas</option>
+                                ${catalogs.contractors.map(c => `<option value="${c}" ${filterC===c?'selected':''}>${c}</option>`).join('')}
+                            </select>
+                            <select id="liq-month" onchange="renderApp()" class="bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] rounded-lg px-4 py-2 text-sm font-semibold text-slate-800 dark:text-white focus:outline-none focus:border-winet-500">
+                                <option value="all">Todos los Meses</option>
+                                ${monthNames.map((m, i) => `<option value="${i}" ${filterM===i.toString()?'selected':''}>${m}</option>`).join('')}
+                            </select>
+                            <select id="liq-year" onchange="renderApp()" class="bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] rounded-lg px-4 py-2 text-sm font-semibold text-slate-800 dark:text-white focus:outline-none focus:border-winet-500">
+                                <option value="2026" ${filterY==='2026'?'selected':''}>2026</option>
+                                <option value="2025" ${filterY==='2025'?'selected':''}>2025</option>
+                                <option value="2024" ${filterY==='2024'?'selected':''}>2024</option>
+                            </select>
+                            <button onclick="printLiquidationFormat()" class="px-5 py-2 bg-winet-600 hover:bg-winet-700 text-white rounded-lg text-sm font-bold flex items-center gap-2 transition-all shadow-md">
+                                <i data-lucide="printer" class="w-4 h-4"></i> Generar Acta
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <!-- Tabla Resumen (Suma) -->
+                        <div class="lg:col-span-1 bg-white dark:bg-[#0a110c] rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm flex flex-col overflow-hidden h-fit">
+                            <div class="p-4 border-b border-slate-200 dark:border-[#122b1c] bg-slate-50 dark:bg-[#030905]">
+                                <h3 class="text-sm font-bold text-slate-800 dark:text-white uppercase tracking-wider flex items-center gap-2"><i data-lucide="sigma" class="w-4 h-4 text-winet-500"></i> Resumen Consolidado</h3>
+                            </div>
+                            <div class="p-0">
+                                <table class="w-full text-left border-collapse text-sm">
+                                    <thead class="bg-slate-50 dark:bg-[#020503]">
+                                        <tr class="text-slate-500 dark:text-stone-400 text-xs uppercase">
+                                            <th class="p-3 border-b border-slate-200 dark:border-[#122b1c]">Material</th>
+                                            <th class="p-3 border-b border-slate-200 dark:border-[#122b1c] text-right">Cantidad Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${Object.keys(materialSummary).length > 0 ? Object.entries(materialSummary).sort((a,b)=>b[1]-a[1]).map(([mat, qty]) => `
+                                            <tr class="border-b border-slate-100 dark:border-[#122b1c] last:border-0 hover:bg-slate-50 dark:hover:bg-[#030a05]">
+                                                <td class="p-3 text-slate-700 dark:text-stone-300 font-medium">${mat}</td>
+                                                <td class="p-3 text-right font-black text-winet-600 dark:text-winet-500">${qty}</td>
+                                            </tr>
+                                        `).join('') : `<tr><td colspan="2" class="p-6 text-center text-slate-400">No hay datos en este periodo.</td></tr>`}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Detalle de Tickets -->
+                        <div class="lg:col-span-2 bg-white dark:bg-[#0a110c] rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm flex flex-col overflow-hidden">
+                            <div class="p-4 border-b border-slate-200 dark:border-[#122b1c] bg-slate-50 dark:bg-[#030905]">
+                                <h3 class="text-sm font-bold text-slate-800 dark:text-white uppercase tracking-wider flex items-center gap-2"><i data-lucide="list" class="w-4 h-4 text-winet-500"></i> Detalle por Ticket</h3>
+                            </div>
+                            <div class="overflow-x-auto max-h-[500px] custom-scrollbar">
+                                <table class="w-full text-left border-collapse text-xs whitespace-nowrap">
+                                    <thead class="bg-slate-50 dark:bg-[#020503] sticky top-0 z-10 shadow-sm">
+                                        <tr class="text-slate-500 dark:text-stone-400 uppercase tracking-wider">
+                                            <th class="p-3 border-b border-slate-200 dark:border-[#122b1c]">Fecha Cierre</th>
+                                            <th class="p-3 border-b border-slate-200 dark:border-[#122b1c]">Ticket ID</th>
+                                            <th class="p-3 border-b border-slate-200 dark:border-[#122b1c]">Contratista</th>
+                                            <th class="p-3 border-b border-slate-200 dark:border-[#122b1c]">Material</th>
+                                            <th class="p-3 border-b border-slate-200 dark:border-[#122b1c] text-center">Cant.</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-100 dark:divide-[#122b1c]">
+                                        ${filteredTickets.length > 0 ? filteredTickets.flatMap(t => t.closureData.materials.map(m => `
+                                            <tr class="hover:bg-slate-50 dark:hover:bg-[#030a05]">
+                                                <td class="p-3 text-slate-600 dark:text-stone-400">${formatCustomDate(t.closureData.closedAt)}</td>
+                                                <td class="p-3 font-mono font-bold text-slate-900 dark:text-white">${t.id}</td>
+                                                <td class="p-3 text-slate-700 dark:text-stone-300">${t.contractor || 'Interno'}</td>
+                                                <td class="p-3 text-slate-700 dark:text-stone-300">${m.name}</td>
+                                                <td class="p-3 text-center font-bold text-winet-600 dark:text-winet-500">${m.qty}</td>
+                                            </tr>
+                                        `)).join('') : `<tr><td colspan="5" class="p-8 text-center text-slate-400">Sin registros detallados.</td></tr>`}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function printLiquidationFormat() {
+            const filterM = document.getElementById('liq-month').value;
+            const filterY = document.getElementById('liq-year').value;
+            const filterC = document.getElementById('liq-contractor').value;
+            
+            if (filterC === 'all') return showToast('Por favor, seleccione un Contratista específico para generar el acta.', 'error');
+            
+            const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+            const periodStr = filterM === 'all' ? `Todo el Año ${filterY}` : `${monthNames[parseInt(filterM)]} ${filterY}`;
+            
+            const tickets = getTickets().filter(t => t.status === 'finalizado' && t.closureData && t.closureData.materials && t.contractor === filterC);
+            const materialSummary = {};
+            tickets.forEach(t => {
+                if(t.closureData.closedAt) {
+                    const d = new Date(t.closureData.closedAt);
+                    if((filterM === 'all' || d.getMonth().toString() === filterM) && d.getFullYear().toString() === filterY) {
+                        t.closureData.materials.forEach(m => {
+                            if (!materialSummary[m.name]) materialSummary[m.name] = 0;
+                            materialSummary[m.name] += parseInt(m.qty);
+                        });
+                    }
+                }
+            });
+
+            if (Object.keys(materialSummary).length === 0) return showToast('No hay materiales liquidados para este filtro.', 'error');
+
+            const printWindow = window.open('', '_blank', 'width=900,height=700');
+            printWindow.document.write(`
+                <html>
+                <head>
+                    <title>Acta de Liquidación - ${filterC}</title>
+                    <style>
+                        body { font-family: 'Arial', sans-serif; padding: 40px; color: #333; }
+                        .header { text-align: center; border-bottom: 2px solid #16a34a; padding-bottom: 20px; margin-bottom: 30px; }
+                        .header h1 { margin: 0; color: #16a34a; font-size: 24px; text-transform: uppercase; }
+                        .header p { margin: 5px 0 0 0; font-size: 14px; color: #666; }
+                        .meta-info { display: flex; justify-content: space-between; margin-bottom: 30px; font-size: 14px; }
+                        table { w-full; border-collapse: collapse; margin-bottom: 40px; width: 100%; }
+                        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; font-size: 13px; }
+                        th { background-color: #f8fafc; color: #333; text-transform: uppercase; font-size: 12px; }
+                        .qty-col { text-align: center; font-weight: bold; width: 150px; }
+                        .signatures { display: flex; justify-content: space-around; margin-top: 80px; }
+                        .sig-box { text-align: center; width: 250px; }
+                        .sig-line { border-top: 1px solid #333; margin-bottom: 10px; }
+                        .sig-box p { margin: 0; font-size: 12px; }
+                    </style>
+                </head>
+                <body>
+                    <div class="header">
+                        <h1>Acta de Liquidación de Materiales PEXT</h1>
+                        <p>Red de Fibra Óptica - Telecomunicaciones</p>
+                    </div>
+                    
+                    <div class="meta-info">
+                        <div>
+                            <strong>Contratista:</strong> ${filterC}<br><br>
+                            <strong>Periodo de Ejecución:</strong> ${periodStr}
+                        </div>
+                        <div style="text-align: right;">
+                            <strong>Fecha de Impresión:</strong> ${formatCustomDate(new Date().toISOString())}<br><br>
+                            <strong>Generado por:</strong> ${getCurrentUser().name}
+                        </div>
+                    </div>
+
+                    <h3>Resumen Consolidado de Materiales Utilizados</h3>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Ítem / Descripción del Material</th>
+                                <th class="qty-col">Cantidad Consumida</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${Object.entries(materialSummary).sort((a,b)=>b[1]-a[1]).map(([mat, qty]) => `
+                                <tr>
+                                    <td>${mat}</td>
+                                    <td class="qty-col">${qty}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+
+                    <p style="font-size: 12px; color: #666;">* El presente documento tiene carácter de declaración jurada respecto al consumo real en planta externa durante el periodo señalado. Los materiales detallados han sido rebajados del inventario virtual.</p>
+
+                    <div class="signatures">
+                        <div class="sig-box">
+                            <div class="sig-line"></div>
+                            <p><strong>Firma y Sello Contratista</strong></p>
+                            <p>${filterC}</p>
+                        </div>
+                        <div class="sig-box">
+                            <div class="sig-line"></div>
+                            <p><strong>Conformidad Operaciones WINET</strong></p>
+                            <p>Supervisión PEXT</p>
+                        </div>
+                    </div>
+                </body>
+                </html>
+            `);
+            printWindow.document.close();
+            setTimeout(() => { printWindow.print(); }, 500);
+        }
+
+        // --- ANALÍTICA AVANZADA E INDICADORES (POWER BI STYLE) ---
+        let analyticsCharts = []; // Variable global para destruir instancias previas
+        
+        function renderAnalyticsView() {
+            const tickets = getTickets();
+            const total = tickets.length;
+            const finalized = tickets.filter(t => t.status === 'finalizado').length;
+            const clientsAffected = tickets.reduce((acc, t) => acc + (parseInt(t.affectedClients) || 0), 0);
+            
+            // Calculo de SLA Promedio (Tiempo de solución)
+            let totalHours = 0;
+            let slaTickets = 0;
+            tickets.forEach(t => {
+                if(t.status === 'finalizado' && t.closureData?.closedAt && t.createdAt) {
+                    const diff = new Date(t.closureData.closedAt) - new Date(t.createdAt);
+                    if(diff > 0) { totalHours += (diff / (1000 * 60 * 60)); slaTickets++; }
+                }
+            });
+            const avgSLA = slaTickets > 0 ? (totalHours / slaTickets).toFixed(2) : '0.00';
+
+            // Generar meses dinámicos basados en la data existente para el select
+            const monthsAvailable = [...new Set(tickets.map(t => new Date(t.createdAt).getMonth()))].sort((a,b)=>a-b);
+            const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+
+            return `
+                <div class="space-y-6">
+                    <!-- Cabecera y Filtros -->
+                    <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center bg-white dark:bg-[#0a110c] p-5 rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm gap-4">
+                        <h2 class="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
+                            <i data-lucide="bar-chart-2" class="text-winet-500"></i> Indicadores y Métricas (Power BI)
+                        </h2>
+                        <div class="flex flex-wrap gap-3">
+                            <select id="ana-month" onchange="initAnalyticsCharts()" class="bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] rounded-lg px-4 py-2 text-sm font-semibold text-slate-800 dark:text-white focus:outline-none focus:border-winet-500">
+                                <option value="all">Todos los Meses</option>
+                                ${monthsAvailable.map(m => `<option value="${m}">${monthNames[m]}</option>`).join('')}
+                            </select>
+                            <select id="ana-year" onchange="initAnalyticsCharts()" class="bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] rounded-lg px-4 py-2 text-sm font-semibold text-slate-800 dark:text-white focus:outline-none focus:border-winet-500">
+                                <option value="all">Todos los Años</option>
+                                <option value="2026">2026</option>
+                                <option value="2025">2025</option>
+                                <option value="2024">2024</option>
+                            </select>
+                            <button onclick="exportToCSV()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-bold flex items-center gap-2 transition-all shadow-md">
+                                <i data-lucide="download" class="w-4 h-4"></i> Exportar Data
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Tarjetas de KPI -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4" id="ana-kpis">
+                        ${renderKpiCard('Total Histórico', total, 'ticket', 'text-blue-500', 'bg-blue-50 text-blue-600 dark:bg-blue-500/10')}
+                        ${renderKpiCard('Tickets Finalizados', finalized, 'check-circle-2', 'text-winet-500', 'bg-winet-50 text-winet-600 dark:bg-winet-500/10')}
+                        ${renderKpiCard('SLA Promedio', avgSLA + ' H', 'clock', 'text-purple-500', 'bg-purple-50 text-purple-600 dark:bg-purple-500/10')}
+                        ${renderKpiCard('Total Afectados', clientsAffected.toLocaleString(), 'users', 'text-amber-500', 'bg-amber-50 text-amber-600 dark:bg-amber-500/10')}
+                    </div>
+
+                    <!-- Gráficos Principales -->
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div class="lg:col-span-2 bg-white dark:bg-[#0a110c] p-6 rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm flex flex-col">
+                            <h3 class="text-sm font-bold text-slate-800 dark:text-white mb-6 uppercase tracking-wider">Evolución: Averías vs SLA Promedio</h3>
+                            <div class="flex-1 min-h-[250px] relative"><canvas id="chart-timeline"></canvas></div>
+                        </div>
+                        <div class="bg-white dark:bg-[#0a110c] p-6 rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm flex flex-col">
+                            <h3 class="text-sm font-bold text-slate-800 dark:text-white mb-6 uppercase tracking-wider">Tickets por Categoría</h3>
+                            <div class="flex-1 min-h-[250px] relative flex justify-center"><canvas id="chart-category"></canvas></div>
+                        </div>
+                    </div>
+
+                    <!-- Gráficos Secundarios -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                         <div class="bg-white dark:bg-[#0a110c] p-6 rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm flex flex-col">
+                            <h3 class="text-sm font-bold text-slate-800 dark:text-white mb-6 uppercase tracking-wider">Top 5 Causas Raíz (Frecuencia)</h3>
+                            <div class="flex-1 min-h-[200px] relative"><canvas id="chart-causes"></canvas></div>
+                        </div>
+                         <div class="bg-white dark:bg-[#0a110c] p-6 rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm flex flex-col">
+                            <h3 class="text-sm font-bold text-slate-800 dark:text-white mb-6 uppercase tracking-wider">Tickets por Zona / Región</h3>
+                            <div class="flex-1 min-h-[200px] relative"><canvas id="chart-zones"></canvas></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Data Table Maestra Interactiva -->
+                    <div class="bg-white dark:bg-[#0a110c] rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm overflow-hidden flex flex-col">
+                        <div class="p-5 border-b border-slate-200 dark:border-[#122b1c] bg-slate-50 dark:bg-[#030905]">
+                            <h3 class="text-sm font-bold text-slate-800 dark:text-white uppercase tracking-wider">Registros Detallados (Data Table)</h3>
+                        </div>
+                        <div class="overflow-x-auto custom-scrollbar p-2">
+                            <table class="w-full text-left border-collapse text-xs whitespace-nowrap">
+                                <thead>
+                                    <tr class="text-slate-500 dark:text-stone-400 font-bold uppercase tracking-wider border-b border-slate-200 dark:border-[#122b1c]">
+                                        <th class="p-3 pl-5">ID Ticket</th>
+                                        <th class="p-3">Fecha de Reporte</th>
+                                        <th class="p-3">Motivo / Tipo</th>
+                                        <th class="p-3">Nodo Afectado</th>
+                                        <th class="p-3 text-center">Afectados</th>
+                                        <th class="p-3">Estatus</th>
+                                        <th class="p-3">Contratista</th>
+                                        <th class="p-3">Causa Raíz</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="ana-table-body">
+                                    <!-- Rellenado por initAnalyticsCharts -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Motor de Renderizado y Filtrado de Gráficos (Chart.js)
+        function initAnalyticsCharts() {
+            // Limpiar lienzos anteriores
+            analyticsCharts.forEach(c => c.destroy());
+            analyticsCharts = [];
+
+            const tickets = getTickets();
+            const filterM = document.getElementById('ana-month')?.value || 'all';
+            const filterY = document.getElementById('ana-year')?.value || 'all';
+
+            // Lógica de Filtrado Activo
+            const filtered = tickets.filter(t => {
+                if(!t.createdAt) return false;
+                const d = new Date(t.createdAt);
+                if (filterM !== 'all' && d.getMonth().toString() !== filterM) return false;
+                if (filterY !== 'all' && d.getFullYear().toString() !== filterY) return false;
+                return true;
+            });
+
+            // 1. Data Línea de Tiempo (Por Mes/Año)
+            const timeMap = {};
+            filtered.forEach(t => {
+                const d = new Date(t.createdAt);
+                const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+                if(!timeMap[k]) timeMap[k] = { tickets: 0, clients: 0 };
+                timeMap[k].tickets++;
+                timeMap[k].clients += (parseInt(t.affectedClients) || 0);
+            });
+            const timeKeys = Object.keys(timeMap).sort();
+
+            // 2. Data Categorías (Anillo)
+            const catMap = {};
+            filtered.forEach(t => catMap[t.category] = (catMap[t.category]||0) + 1);
+
+            // 3. Data Top Causas Raíz (Barras Horizontales)
+            const causeMap = {};
+            filtered.forEach(t => {
+                if(t.closureData?.cause) causeMap[t.closureData.cause] = (causeMap[t.closureData.cause]||0) + 1;
+            });
+            const topCauses = Object.entries(causeMap).sort((a,b)=>b[1]-a[1]).slice(0,5); // Solo las Top 5
+
+            // 4. Data por Zonas (Barras Verticales)
+            const zoneMap = {};
+            filtered.forEach(t => zoneMap[t.zone] = (zoneMap[t.zone]||0) + 1);
+
+            // Configuraciones de UI Global de Chart.js adaptadas al Tema Claro/Oscuro
+            const isDark = document.documentElement.classList.contains('dark');
+            const gridColor = isDark ? '#1f2937' : '#e2e8f0';
+            Chart.defaults.color = isDark ? '#94a3b8' : '#64748b';
+            Chart.defaults.font.family = 'Inter';
+
+            // Dibujar Gráfico 1: Timeline
+            const ctxTimeline = document.getElementById('chart-timeline')?.getContext('2d');
+            if(ctxTimeline) analyticsCharts.push(new Chart(ctxTimeline, {
+                type: 'line',
+                data: {
+                    labels: timeKeys,
+                    datasets: [
+                        { label: 'Volumen de Tickets', data: timeKeys.map(k => timeMap[k].tickets), borderColor: '#16a34a', backgroundColor: 'rgba(22,163,74,0.1)', fill: true, tension: 0.4, borderWidth: 3 },
+                        { label: 'Clientes Afectados', data: timeKeys.map(k => timeMap[k].clients), borderColor: '#3b82f6', borderDash: [5,5], tension: 0.4, yAxisID: 'y1', borderWidth: 2 }
+                    ]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { position: 'top' } },
+                    scales: { 
+                        x: { grid: { color: gridColor } },
+                        y: { beginAtZero: true, grid: { color: gridColor } }, 
+                        y1: { position: 'right', beginAtZero: true, grid: { drawOnChartArea: false } } 
+                    }
+                }
+            }));
+
+            // Dibujar Gráfico 2: Categorías
+            const ctxCat = document.getElementById('chart-category')?.getContext('2d');
+            if(ctxCat) analyticsCharts.push(new Chart(ctxCat, {
+                type: 'doughnut',
+                data: {
+                    labels: Object.keys(catMap),
+                    datasets: [{ data: Object.values(catMap), backgroundColor: ['#16a34a', '#0ea5e9', '#8b5cf6', '#f59e0b', '#ec4899'], borderWidth: 0, cutout: '70%' }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+            }));
+
+            // Dibujar Gráfico 3: Causas
+            const ctxCause = document.getElementById('chart-causes')?.getContext('2d');
+            if(ctxCause) analyticsCharts.push(new Chart(ctxCause, {
+                type: 'bar',
+                data: {
+                    labels: topCauses.map(c => c[0].length > 25 ? c[0].substring(0,25)+'...' : c[0]),
+                    datasets: [{ label: 'Nº Ocurrencias', data: topCauses.map(c => c[1]), backgroundColor: '#16a34a', borderRadius: 4 }]
+                },
+                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { grid: { color: gridColor } }, y: { grid: { display: false } } }, plugins: { legend: { display: false } } }
+            }));
+
+            // Dibujar Gráfico 4: Zonas
+            const ctxZone = document.getElementById('chart-zones')?.getContext('2d');
+            if(ctxZone) analyticsCharts.push(new Chart(ctxZone, {
+                type: 'bar',
+                data: {
+                    labels: Object.keys(zoneMap),
+                    datasets: [{ label: 'Tickets por Zona', data: Object.values(zoneMap), backgroundColor: '#0ea5e9', borderRadius: 4 }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, scales: { y: { grid: { color: gridColor } }, x: { grid: { display: false } } }, plugins: { legend: { display: false } } }
+            }));
+
+            // Actualizar la Tabla Maestra Visual (limitando a 100 para no saturar el DOM en Data grande)
+            const tBody = document.getElementById('ana-table-body');
+            if(tBody) {
+                tBody.innerHTML = filtered.slice(0, 100).map(t => {
+                    let statusColor = 'bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400';
+                    if(t.status === 'en_proceso') statusColor = 'bg-sky-100 text-sky-700 dark:bg-sky-500/10 dark:text-sky-400';
+                    if(t.status === 'finalizado') statusColor = 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400';
+
+                    return `
+                    <tr class="border-b border-slate-100 dark:border-[#122b1c] hover:bg-slate-50 dark:hover:bg-[#030a05] transition-colors">
+                        <td class="p-3 pl-5 font-mono text-winet-600 dark:text-winet-500 font-bold">${t.id}</td>
+                        <td class="p-3 text-slate-700 dark:text-stone-300">${formatCustomDate(t.createdAt)}</td>
+                        <td class="p-3 text-slate-700 dark:text-stone-300">${t.ticketType}</td>
+                        <td class="p-3 font-semibold text-slate-900 dark:text-white">${t.nodo}</td>
+                        <td class="p-3 text-center text-slate-700 dark:text-stone-300 font-bold">${t.affectedClients}</td>
+                        <td class="p-3"><span class="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${statusColor}">${t.status.replace('_',' ')}</span></td>
+                        <td class="p-3 text-slate-700 dark:text-stone-300">${t.contractor || '-'}</td>
+                        <td class="p-3 text-slate-500 dark:text-stone-500 truncate max-w-[200px]" title="${t.closureData?.cause || 'N/A'}">${t.closureData?.cause || 'N/A'}</td>
+                    </tr>
+                `}).join('') + (filtered.length > 100 ? `<tr><td colspan="8" class="p-4 text-center text-xs text-slate-400 dark:text-stone-500">Mostrando los primeros 100 registros que coinciden con el filtro. Utilice 'Exportar Data' para ver los ${filtered.length} tickets completos.</td></tr>` : '');
+            }
+        }
+
+        window.onload = function() { setTheme(currentTheme); renderApp(); };
+    </script>
+</body>
+</html>
