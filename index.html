@@ -1,0 +1,1411 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WINET • Sistema PEXT de Averías Empresarial</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        winet: {
+                            50: '#f0fdf4',
+                            100: '#dcfce7',
+                            500: '#22c55e',
+                            600: '#16a34a',
+                            700: '#15803d',
+                            800: '#166534',
+                            900: '#14532d',
+                            950: '#052e16',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace']
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+    <!-- Chart.js for Advanced Analytics -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- SheetJS for Excel Import/Export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+        .dark ::-webkit-scrollbar-thumb { background: #1f2937; }
+        * { transition-property: background-color, border-color, color; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms; }
+        @keyframes pulseGlow {
+            0%, 100% { filter: drop-shadow(0 0 12px rgba(34,197,94,0.5)); }
+            50% { filter: drop-shadow(0 0 22px rgba(34,197,94,0.8)); }
+        }
+        .animate-logo { animation: pulseGlow 3s infinite ease-in-out; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 dark:bg-[#020503] dark:text-[#e2e8f0] min-h-screen antialiased selection:bg-winet-500 selection:text-white">
+
+    <div id="app" class="min-h-screen flex flex-col"></div>
+    <div id="modal-container"></div>
+    <div id="toast-container" class="fixed bottom-5 right-5 z-[100] flex flex-col gap-2 pointer-events-none"></div>
+
+    <script>
+        const STORAGE_KEYS = {
+            USERS: 'winet_pext_users_v8',
+            TICKETS: 'winet_pext_tickets_v8',
+            CATALOGS: 'winet_pext_catalogs_v8',
+            CURRENT_USER: 'winet_pext_current_user_v8',
+            THEME: 'winet_pext_theme_v8',
+            RECYCLED_IDS: 'winet_pext_recycled_ids_v4',
+            AUDIT_LOGS: 'winet_pext_audit_logs_v1'
+        };
+
+        const DEFAULT_USERS = [
+            { id: 'u1', name: 'Ing. Carlos Mendoza', email: 'carlos.mendoza@winet.pe', pass: 'winet2026', role: 'admin', phone: '+51 987654321', docId: '45879621', avatar: 'https://placehold.co/150x150/16a34a/ffffff?text=CM' },
+            { id: 'u2', name: 'Ana Torres', email: 'ana.torres@winet.pe', pass: 'noc123', role: 'noc', phone: '+51 912345678', docId: '09876543', avatar: 'https://placehold.co/150x150/3b82f6/ffffff?text=AT' },
+            { id: 'u3', name: 'Mateo Aparcana', email: 'maparcana@winet.pe', pass: 'winet2026', role: 'supervisor', phone: '+51 997596056', docId: '10290907', avatar: 'https://placehold.co/150x150/f59e0b/ffffff?text=MA' },
+            { id: 'u4', name: 'Jeff Cochaches', email: 'jcochaches@winet.pe', pass: 'winet2026', role: 'supervisor', phone: '+51 936112828', docId: '70110653', avatar: 'https://placehold.co/150x150/a855f7/ffffff?text=JC' },
+            { id: 'u5', name: 'Miguel Rossell', email: 'mrossell@winet.pe', pass: 'winet2026', role: 'supervisor', phone: '+51 925133226', docId: '76083672', avatar: 'https://placehold.co/150x150/10b981/ffffff?text=MR' },
+            { id: 'u15', name: 'Técnico Campo 1', email: 'tecnico1@winet.pe', pass: 'winet2026', role: 'tecnico', phone: '+51 900111222', docId: '80123456', avatar: 'https://placehold.co/150x150/06b6d4/ffffff?text=TC1' }
+        ];
+
+        const DEFAULT_CATALOGS = {
+            contractors: ['ARKTURIAS', 'FIBERTEK S.A.C.', 'TELECONECTA EIRL', 'REDES ANDINAS S.A.', 'WINET FIELD OPS', 'KAJOMI', 'CESPEDES'],
+            causes: [
+                'Corte de FO por baja altura por cruce de vehículo',
+                'Corte de fibra óptica por cambio de poste',
+                'Corte de fibra óptica por vandalismo',
+                'Corte de FO por obras civiles de terceros',
+                'Atenuación severa en conector CTO por humedad',
+                'Falla de energía en nodo principal',
+                'Rotura de cable drop por caída de árbol',
+                'Hilo dañado / atenuado en mufa'
+            ],
+            solutions: [
+                'Empalme de fusión de fibra óptica y ordenamiento en mufa',
+                'Instalación de nuevo tramo de cable drop y conectores SC/APC',
+                'Reemplazo de splitter óptico en CTO siniestrada',
+                'Reconfiguración y normalización de potencias ópticas',
+                'Reparación de bandeja de acometida y sangrado de FO'
+            ],
+            materials: [
+                { name: 'Conector SC/APC', unit: 'Unidades' },
+                { name: 'Cable Drop 1 Hilo LSZH', unit: 'Metros' },
+                { name: 'Mufa Terminal 24F', unit: 'Piezas' },
+                { name: 'Splice Protector (Mangas)', unit: 'Unidades' },
+                { name: 'Precintos de Nylon', unit: 'Paquetes' }
+            ]
+        };
+
+        if (!localStorage.getItem(STORAGE_KEYS.USERS)) localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(DEFAULT_USERS));
+        if (!localStorage.getItem(STORAGE_KEYS.CATALOGS)) localStorage.setItem(STORAGE_KEYS.CATALOGS, JSON.stringify(DEFAULT_CATALOGS));
+        if (!localStorage.getItem(STORAGE_KEYS.RECYCLED_IDS)) localStorage.setItem(STORAGE_KEYS.RECYCLED_IDS, JSON.stringify({ AVE: [], BKN: [], RQM: [] }));
+        if (!localStorage.getItem(STORAGE_KEYS.AUDIT_LOGS)) localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify([]));
+
+        let currentTheme = localStorage.getItem(STORAGE_KEYS.THEME) || 'light';
+        if (currentTheme === 'dark') document.documentElement.classList.add('dark');
+
+        function getUsers() { return JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS)); }
+        function saveUsers(u) { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(u)); }
+        function getCatalogs() { return JSON.parse(localStorage.getItem(STORAGE_KEYS.CATALOGS)); }
+        function saveCatalogs(c) { localStorage.setItem(STORAGE_KEYS.CATALOGS, JSON.stringify(c)); }
+        function getCurrentUser() { const raw = localStorage.getItem(STORAGE_KEYS.CURRENT_USER); return raw ? JSON.parse(raw) : null; }
+        function setCurrentUser(u) { if(u) localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(u)); else localStorage.removeItem(STORAGE_KEYS.CURRENT_USER); }
+        function getRecycledIds() { const raw = localStorage.getItem(STORAGE_KEYS.RECYCLED_IDS); return raw ? JSON.parse(raw) : { AVE: [], BKN: [], RQM: [] }; }
+        function saveRecycledIds(r) { localStorage.setItem(STORAGE_KEYS.RECYCLED_IDS, JSON.stringify(r)); }
+        function getAuditLogs() { const raw = localStorage.getItem(STORAGE_KEYS.AUDIT_LOGS); return raw ? JSON.parse(raw) : []; }
+        function logAudit(action, details) {
+            const logs = getAuditLogs();
+            const user = getCurrentUser();
+            logs.unshift({ time: new Date().toISOString(), user: user ? user.name : 'Sistema', action, details });
+            if (logs.length > 100) logs.pop();
+            localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(logs));
+        }
+
+        function getTickets() {
+            const raw = localStorage.getItem(STORAGE_KEYS.TICKETS);
+            if (!raw) {
+                const initial = [
+                    { id: 'AVE-24953', requestDate: '2026-09-28T10:16', createdAt: new Date().toISOString(), ticketType: 'Avería Clientes Loss', category: 'AVERIA', reportArea: 'Calidad Operativa', affectedClients: 3, elementType: 'CAJA CTO', elementCode: '2026092820000239', coords: { lat: -12.9897768, lng: -77.0909098 }, nodo: 'NODO HUARAL', project: 'HUARAL 2', distrito: 'HUARAL', zone: 'LIMA PROVINCIA', details: 'ROTULADO CTO:\nWN-15202-1491957', status: 'pendiente', supervisor: 'Mateo Aparcana', contractor: 'ARKTURIAS', brigada: 'Huaral', closureData: null },
+                    { id: 'BKN-24954', requestDate: '2026-09-28T11:06', createdAt: new Date(Date.now() - 3600000 * 4).toISOString(), ticketType: 'Tickets de Backbone', category: 'BACKBONE', reportArea: 'NOC', affectedClients: 120, elementType: 'FO TRONCAL', elementCode: 'BB-TRONCAL-09', coords: { lat: -12.0464, lng: -77.0428 }, nodo: 'NODO SAN LUIS', project: 'LIMA CENTRO 1', distrito: 'SAN LUIS', zone: 'LIMA CENTRO', details: 'Corte de fibra troncal por obras viales.', status: 'en_proceso', assignedAt: new Date(Date.now() - 3600000 * 3).toISOString(), supervisor: 'Jeff Cochaches', contractor: 'FIBERTEK S.A.C.', brigada: 'Brigada San Luis A', closureData: null },
+                    { id: 'RQM-24955', requestDate: '2026-09-28T03:06', createdAt: new Date(Date.now() - 3600000 * 12).toISOString(), ticketType: 'Tickets de Requerimiento', category: 'REQUERIMIENTO', reportArea: 'Campo', affectedClients: 15, elementType: 'AMPLIFICADOR', elementCode: 'AMP-HUANDOY-02', coords: { lat: -11.9850, lng: -77.0650 }, nodo: 'NODO HUANDOY', project: 'LOS OLIVOS N', distrito: 'LOS OLIVOS', zone: 'LIMA NORTE', details: 'Mantenimiento preventivo.', status: 'finalizado', assignedAt: new Date(Date.now() - 3600000 * 10).toISOString(), supervisor: 'Miguel Rossell', contractor: 'REDES ANDINAS S.A.', brigada: 'Brigada Norte 1', closureData: { startTime: '08:30', endTime: '11:15', cause: 'Atenuación severa en conector CTO por humedad', solution: 'Reconfiguración y normalización de potencias ópticas', materials: [{ name: 'Conector SC/APC', qty: 4 }], closedAt: new Date(Date.now() - 3600000 * 8).toISOString() } }
+                ];
+                localStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(initial));
+                return initial;
+            }
+            return JSON.parse(raw);
+        }
+        function saveTickets(t) { localStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(t)); }
+
+        function generateNextTicketId(ticketType) {
+            let prefix = 'AVE';
+            if (ticketType === 'Tickets de Backbone') prefix = 'BKN';
+            if (ticketType === 'Tickets de Requerimiento') prefix = 'RQM';
+            const recycled = getRecycledIds();
+            if (recycled[prefix] && recycled[prefix].length > 0) {
+                recycled[prefix].sort((a, b) => a - b);
+                const recycledNum = recycled[prefix].shift();
+                saveRecycledIds(recycled);
+                return `${prefix}-${recycledNum}`;
+            }
+            return `${prefix}-${Math.floor(10000 + Math.random() * 90000)}`;
+        }
+
+        function showToast(msg, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            const baseClass = "pointer-events-none px-4 py-3 rounded-xl shadow-lg text-sm font-semibold flex items-center gap-3 border transition-all transform translate-y-2 opacity-0";
+            const typeClass = type === 'success' 
+                ? "bg-white text-slate-800 border-green-500/30 dark:bg-[#0a110c] dark:text-white dark:border-green-500" 
+                : "bg-white text-slate-800 border-rose-500/30 dark:bg-rose-950 dark:text-white dark:border-rose-600";
+            toast.className = `${baseClass} ${typeClass}`;
+            toast.innerHTML = `<i data-lucide="${type === 'success' ? 'check-circle-2' : 'alert-circle'}" class="w-5 h-5 ${type === 'success' ? 'text-green-500' : 'text-rose-500'}"></i> <span>${msg}</span>`;
+            container.appendChild(toast);
+            lucide.createIcons();
+            setTimeout(() => { toast.classList.remove('translate-y-2', 'opacity-0'); }, 10);
+            setTimeout(() => {
+                toast.classList.add('translate-y-2', 'opacity-0');
+                setTimeout(() => toast.remove(), 300);
+            }, 3500);
+        }
+
+        let currentView = 'dashboard';
+        let tempMaterials = [];
+
+        function getElapsedTime(startIso, endIso = null) {
+            if (!startIso) return { text: '0h 0m', ms: 0 };
+            const start = new Date(startIso);
+            const end = endIso ? new Date(endIso) : new Date();
+            const diffMs = end - start;
+            if (diffMs < 0) return { text: '0h 0m', ms: 0 };
+            const hrs = Math.floor(diffMs / (1000 * 60 * 60));
+            const mins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+            return { text: `${hrs}h ${mins}m`, ms: diffMs };
+        }
+
+        function setTheme(theme) {
+            currentTheme = theme;
+            localStorage.setItem(STORAGE_KEYS.THEME, theme);
+            if (theme === 'dark') document.documentElement.classList.add('dark');
+            else document.documentElement.classList.remove('dark');
+            renderApp();
+        }
+
+        function switchView(view) {
+            currentView = view;
+            renderApp();
+        }
+
+        function renderApp() {
+            const user = getCurrentUser();
+            const appEl = document.getElementById('app');
+
+            if (!user) {
+                appEl.innerHTML = renderLoginScreen();
+                lucide.createIcons();
+                return;
+            }
+
+            appEl.innerHTML = `
+                <header class="sticky top-0 z-40 bg-white/95 dark:bg-[#0a110c]/95 dark:backdrop-blur-xl border-b border-slate-200 dark:border-[#122b1c] px-4 lg:px-8 py-3.5 flex items-center justify-between shadow-sm">
+                    <div class="flex items-center gap-6">
+                        <div class="flex flex-col gap-1.5">
+                            <div class="cursor-pointer group flex items-center gap-3" onclick="switchView('dashboard')">
+                                <div class="font-black tracking-wider text-2xl flex items-center animate-logo text-winet-600 dark:text-winet-400">
+                                    WINET <span class="text-xs ml-2 font-mono px-2 py-0.5 rounded bg-winet-100 dark:bg-winet-900/40 text-winet-700 dark:text-winet-300">CLOUD</span>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2 bg-slate-100/80 dark:bg-[#030a05] px-2.5 py-1 rounded-xl border border-slate-200/80 dark:border-[#122b1c] w-fit">
+                                <img src="${user.avatar}" alt="Avatar" class="w-6 h-6 rounded-full object-cover border border-winet-500 shadow-sm">
+                                <div>
+                                    <div class="text-[11px] font-bold text-slate-900 dark:text-white leading-tight">${user.name}</div>
+                                    <div class="text-[8px] font-mono text-winet-600 dark:text-winet-400 uppercase font-bold">${user.role} • ${user.docId || 'DNI N/A'}</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <nav class="hidden xl:flex items-center gap-1 text-xs font-semibold">
+                            <button onclick="switchView('dashboard')" class="px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 ${currentView === 'dashboard' ? 'bg-slate-100 text-winet-700 dark:bg-winet-900/30 dark:text-winet-400' : 'text-slate-600 hover:text-slate-900 dark:text-stone-400 dark:hover:text-white'}"><i data-lucide="layout-dashboard" class="w-4 h-4"></i> Dashboard</button>
+                            <button onclick="switchView('queues')" class="px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 ${currentView === 'queues' ? 'bg-slate-100 text-winet-700 dark:bg-winet-900/30 dark:text-winet-400' : 'text-slate-600 hover:text-slate-900 dark:text-stone-400 dark:hover:text-white'}"><i data-lucide="kanban" class="w-4 h-4"></i> Asignación</button>
+                            <button onclick="switchView('new_ticket')" class="px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 ${currentView === 'new_ticket' ? 'bg-slate-100 text-winet-700 dark:bg-winet-900/30 dark:text-winet-400' : 'text-slate-600 hover:text-slate-900 dark:text-stone-400 dark:hover:text-white'}"><i data-lucide="plus-circle" class="w-4 h-4"></i> Registrar</button>
+                            <button onclick="switchView('telegram_summary')" class="px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 ${currentView === 'telegram_summary' ? 'bg-slate-100 text-winet-700 dark:bg-winet-900/30 dark:text-winet-400' : 'text-slate-600 hover:text-slate-900 dark:text-stone-400 dark:hover:text-white'}"><i data-lucide="send" class="w-4 h-4"></i> Telegram</button>
+                            <button onclick="switchView('analytics')" class="px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 ${currentView === 'analytics' ? 'bg-slate-100 text-winet-700 dark:bg-winet-900/30 dark:text-winet-400' : 'text-slate-600 hover:text-slate-900 dark:text-stone-400 dark:hover:text-white'}"><i data-lucide="pie-chart" class="w-4 h-4"></i> Analítica</button>
+                            <button onclick="switchView('liquidation')" class="px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 ${currentView === 'liquidation' ? 'bg-slate-100 text-winet-700 dark:bg-winet-900/30 dark:text-winet-400' : 'text-slate-600 hover:text-slate-900 dark:text-stone-400 dark:hover:text-white'}"><i data-lucide="calculator" class="w-4 h-4"></i> Liquidación</button>
+                            <button onclick="switchView('manual')" class="px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 ${currentView === 'manual' ? 'bg-slate-100 text-winet-700 dark:bg-winet-900/30 dark:text-winet-400' : 'text-slate-600 hover:text-slate-900 dark:text-stone-400 dark:hover:text-white'}"><i data-lucide="book-open" class="w-4 h-4"></i> Manual</button>
+                            ${user.role === 'admin' ? `
+                                <button onclick="switchView('db_manager')" class="px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 \${currentView === 'db_manager' ? 'bg-slate-100 text-winet-700 dark:bg-winet-900/30 dark:text-winet-400' : 'text-slate-600 hover:text-slate-900 dark:text-stone-400 dark:hover:text-white'}"><i data-lucide="database" class="w-4 h-4"></i> Catálogos & Usuarios</button>
+                                <button onclick="switchView('audit')" class="px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 \${currentView === 'audit' ? 'bg-slate-100 text-winet-700 dark:bg-winet-900/30 dark:text-winet-400' : 'text-slate-600 hover:text-slate-900 dark:text-stone-400 dark:hover:text-white'}"><i data-lucide="shield-alert" class="w-4 h-4"></i> Auditoría</button>
+                            ` : ''}
+                        </nav>
+                    </div>
+
+                    <div class="flex items-center gap-2.5">
+                        <button onclick="setTheme(currentTheme === 'light' ? 'dark' : 'light')" class="p-2 rounded-xl bg-slate-100 dark:bg-[#030a05] text-slate-600 dark:text-stone-300" title="Cambiar Tema"><i data-lucide="${currentTheme === 'light' ? 'sun' : 'moon'}" class="w-4 h-4"></i></button>
+                        <button onclick="logout()" class="p-2 rounded-xl bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400" title="Cerrar Sesión"><i data-lucide="log-out" class="w-4 h-4"></i></button>
+                    </div>
+                </header>
+
+                <main class="flex-1 p-4 lg:p-8 max-w-[1700px] w-full mx-auto">
+                    ${currentView === 'dashboard' ? renderDashboardView() :
+                      currentView === 'queues' ? renderQueuesView() :
+                      currentView === 'new_ticket' ? renderNewTicketView() :
+                      currentView === 'telegram_summary' ? renderTelegramSummaryView() :
+                      currentView === 'analytics' ? renderAnalyticsView() :
+                      currentView === 'liquidation' ? renderLiquidationView() :
+                      currentView === 'manual' ? renderManualView() :
+                      currentView === 'db_manager' && user.role === 'admin' ? renderDbManagerView() :
+                      currentView === 'audit' && user.role === 'admin' ? renderAuditView() : renderDashboardView()}
+                </main>
+            `;
+            lucide.createIcons();
+            if (currentView === 'analytics') setTimeout(initAnalyticsCharts, 100);
+        }
+
+        function renderLoginScreen() {
+            return `
+                <div class="min-h-screen flex items-center justify-center p-4 bg-slate-50 dark:bg-gradient-to-br dark:from-[#020503] dark:via-[#081c0d] dark:to-[#010a04]">
+                    <div class="w-full max-w-md bg-white dark:bg-[#0a110c] p-8 rounded-3xl shadow-xl border border-slate-200 dark:border-winet-500/20 space-y-6">
+                        <div class="text-center space-y-2">
+                            <div class="flex justify-center mb-2">
+                                <div class="font-black tracking-wider text-4xl animate-logo text-winet-600 dark:text-winet-400">WINET</div>
+                            </div>
+                            <h1 class="text-xs font-bold text-slate-500 uppercase tracking-widest">Sistema PEXT de Averías • Cloud Edition</h1>
+                            <p class="text-xs text-slate-400">Plataforma Empresarial Operativa para Telecomunicaciones</p>
+                        </div>
+                        <form onsubmit="handleLogin(event)" class="space-y-4">
+                            <div>
+                                <label class="block text-xs font-bold text-slate-700 dark:text-stone-300 uppercase mb-1">Correo Corporativo</label>
+                                <input type="email" id="login-email" required placeholder="usuario@winet.pe" class="w-full bg-slate-50 dark:bg-[#020503] border border-slate-200 dark:border-[#122b1c] rounded-xl px-4 py-2.5 text-sm font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-winet-500">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-700 dark:text-stone-300 uppercase mb-1">Contraseña</label>
+                                <input type="password" id="login-pass" required placeholder="••••••••" class="w-full bg-slate-50 dark:bg-[#020503] border border-slate-200 dark:border-[#122b1c] rounded-xl px-4 py-2.5 text-sm font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-winet-500">
+                            </div>
+                            <button type="submit" class="w-full py-3 rounded-xl bg-winet-600 hover:bg-winet-700 text-white text-sm font-bold shadow-md transition-all flex items-center justify-center gap-2">
+                                <i data-lucide="log-in" class="w-4 h-4"></i> Iniciar Sesión Segura
+                            </button>
+                        </form>
+                        <div class="bg-slate-50 dark:bg-[#030a05] border border-slate-100 dark:border-[#122b1c] rounded-xl p-3 text-[11px] text-slate-500 dark:text-stone-400 space-y-1 font-mono">
+                            <div class="font-bold text-winet-600 mb-1">Cuentas de Acceso Rápido:</div>
+                            <div>• Admin: <span class="text-slate-800 dark:text-white">carlos.mendoza@winet.pe</span> / winet2026</div>
+                            <div>• Supervisor: <span class="text-slate-800 dark:text-white">maparcana@winet.pe</span> / winet2026</div>
+                            <div>• Técnico Campo: <span class="text-slate-800 dark:text-white">tecnico1@winet.pe</span> / winet2026</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function handleLogin(e) {
+            e.preventDefault();
+            const email = document.getElementById('login-email').value.trim();
+            const pass = document.getElementById('login-pass').value.trim();
+            const user = getUsers().find(u => u.email === email && u.pass === pass);
+            if (user) {
+                setCurrentUser(user);
+                logAudit('LOGIN', `Inicio de sesión exitoso por ${user.name} (${user.role})`);
+                showToast(`Bienvenido, ${user.name}`, 'success');
+                renderApp();
+            } else {
+                showToast('Credenciales incorrectas.', 'error');
+            }
+        }
+
+        function logout() {
+            logAudit('LOGOUT', 'Cierre de sesión');
+            setCurrentUser(null);
+            renderApp();
+        }
+
+        function renderDashboardView() {
+            const tickets = getTickets();
+            const searchQ = document.getElementById('dash-search')?.value.toLowerCase() || '';
+            const statusF = document.getElementById('dash-status-filter')?.value || 'all';
+            const typeF = document.getElementById('dash-type-filter')?.value || 'all';
+
+            const filteredTickets = tickets.filter(t => {
+                const matchSearch = t.id.toLowerCase().includes(searchQ) || t.elementCode.toLowerCase().includes(searchQ) || t.nodo.toLowerCase().includes(searchQ) || (t.distrito && t.distrito.toLowerCase().includes(searchQ));
+                const matchStatus = statusF === 'all' || t.status === statusF;
+                const matchType = typeF === 'all' || t.ticketType === typeF;
+                return matchSearch && matchStatus && matchType;
+            });
+
+            const totalClients = tickets.reduce((acc, t) => acc + (t.affectedClients || 0), 0);
+            const pendCount = tickets.filter(t => t.status === 'pendiente').length;
+            const procCount = tickets.filter(t => t.status === 'en_proceso').length;
+            const finCount = tickets.filter(t => t.status === 'finalizado').length;
+
+            const nodeMap = {}; 
+            tickets.forEach(t => { nodeMap[t.nodo] = (nodeMap[t.nodo] || 0) + 1; });
+            const topNodes = Object.entries(nodeMap).sort((a,b) => b[1] - a[1]).slice(0, 4);
+
+            return `
+                <div class="space-y-6">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                        ${renderKpiCard('Clientes Afectados', totalClients.toLocaleString(), 'users', 'text-slate-500', 'bg-slate-100 dark:bg-slate-800/50')}
+                        ${renderKpiCard('Tickets Totales', tickets.length, 'ticket', 'text-blue-500', 'bg-blue-50 text-blue-600 dark:bg-blue-500/10')}
+                        ${renderKpiCard('Pendientes (Cola)', pendCount, 'clock', 'text-amber-500', 'bg-amber-50 text-amber-600 dark:bg-amber-500/10')}
+                        ${renderKpiCard('En Proceso', procCount, 'activity', 'text-sky-500', 'bg-sky-50 text-sky-600 dark:bg-sky-500/10')}
+                        ${renderKpiCard('Finalizados', finCount, 'check-circle', 'text-winet-500', 'bg-winet-50 text-winet-600 dark:bg-winet-500/10')}
+                    </div>
+
+                    <div class="bg-white dark:bg-[#0a110c] p-5 rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm">
+                        <h3 class="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-white flex items-center gap-2 mb-3">
+                            <i data-lucide="bar-chart-2" class="w-4 h-4 text-winet-500"></i> Top Nodos Afectados
+                        </h3>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                            ${topNodes.map(([node, count], idx) => `
+                                <div class="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-[#020503] border border-slate-100 dark:border-[#122b1c] text-sm">
+                                    <div class="flex items-center gap-2.5">
+                                        <span class="font-bold text-slate-400">#\${idx+1}</span>
+                                        <span class="font-semibold text-slate-700 dark:text-stone-200 truncate max-w-[180px]">\${node}</span>
+                                    </div>
+                                    <span class="px-2 py-0.5 rounded-lg bg-winet-100 text-winet-700 dark:bg-winet-900/30 dark:text-winet-400 font-bold text-xs">\${count}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+
+                    <div class="bg-white dark:bg-[#0a110c] rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm overflow-hidden">
+                        <div class="p-4 border-b border-slate-200 dark:border-[#122b1c] bg-slate-50 dark:bg-[#08120c] flex flex-wrap items-center justify-between gap-3">
+                            <div class="flex flex-wrap items-center gap-3 flex-1">
+                                <div class="relative min-w-[240px]">
+                                    <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-2.5"></i>
+                                    <input type="text" id="dash-search" oninput="renderApp()" value="${searchQ}" placeholder="Buscar Ticket, Código, Nodo..." class="w-full bg-white dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] text-sm rounded-lg pl-9 pr-4 py-2 text-slate-900 dark:text-white focus:outline-none">
+                                </div>
+                                <select id="dash-status-filter" onchange="renderApp()" class="bg-white dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] text-sm rounded-lg px-3 py-2 text-slate-700 dark:text-white font-semibold focus:outline-none">
+                                    <option value="all">Todos los Estatus</option>
+                                    <option value="pendiente" ${statusF==='pendiente'?'selected':''}>Pendiente</option>
+                                    <option value="en_proceso" ${statusF==='en_proceso'?'selected':''}>En Proceso</option>
+                                    <option value="finalizado" ${statusF==='finalizado'?'selected':''}>Finalizado</option>
+                                </select>
+                                <select id="dash-type-filter" onchange="renderApp()" class="bg-white dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] text-sm rounded-lg px-3 py-2 text-slate-700 dark:text-white font-semibold focus:outline-none">
+                                    <option value="all">Todos los Tipos</option>
+                                    <option value="Avería Clientes Loss" ${typeF==='Avería Clientes Loss'?'selected':''}>Avería Clientes Loss</option>
+                                    <option value="Tickets de Backbone" ${typeF==='Tickets de Backbone'?'selected':''}>Tickets de Backbone</option>
+                                    <option value="Tickets de Requerimiento" ${typeF==='Tickets de Requerimiento'?'selected':''}>Tickets de Requerimiento</option>
+                                </select>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button onclick="switchView('new_ticket')" class="px-4 py-2 rounded-lg bg-winet-600 hover:bg-winet-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm">
+                                    <i data-lucide="plus-circle" class="w-4 h-4"></i> Registrar
+                                </button>
+                                <button onclick="exportToCSV()" class="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-[#122b1c] dark:text-stone-300 text-xs font-bold flex items-center gap-1.5 transition-all">
+                                    <i data-lucide="download" class="w-4 h-4"></i> Exportar
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left border-collapse text-xs">
+                                <thead>
+                                    <tr class="bg-white dark:bg-[#030905] text-slate-500 dark:text-stone-400 border-b border-slate-200 dark:border-[#122b1c] uppercase tracking-wider font-semibold">
+                                        <th class="py-3 px-4">Ticket ID</th>
+                                        <th class="py-3 px-4">Motivo / Tipo</th>
+                                        <th class="py-3 px-4">Elemento Afectado</th>
+                                        <th class="py-3 px-4">Clientes / Distrito</th>
+                                        <th class="py-3 px-4">Ubicación GPS</th>
+                                        <th class="py-3 px-4">Supervisión & Contratista</th>
+                                        <th class="py-3 px-4">SLA / Estatus</th>
+                                        <th class="py-3 px-4 text-right">Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-100 dark:divide-[#122b1c]">
+                                    ${filteredTickets.map(t => renderTicketRow(t)).join('') || `<tr><td colspan="8" class="py-12 text-center text-slate-500">No se encontraron tickets registrados.</td></tr>`}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderKpiCard(title, value, icon, iconColor, iconBg) {
+            return `
+                <div class="bg-white dark:bg-[#0a110c] p-4 rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm flex items-center justify-between">
+                    <div>
+                        <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">${title}</div>
+                        <div class="text-xl font-black text-slate-900 dark:text-white mt-1">${value}</div>
+                    </div>
+                    <div class="p-2.5 rounded-xl ${iconBg}"><i data-lucide="${icon}" class="w-5 h-5 ${iconColor}"></i></div>
+                </div>
+            `;
+        }
+
+        function renderTicketRow(t) {
+            let typeStyle = 'bg-rose-100 text-rose-800 dark:bg-rose-500/10 dark:text-rose-400 border-rose-200 dark:border-rose-500/20'; 
+            if (t.ticketType === 'Tickets de Backbone') typeStyle = 'bg-purple-100 text-purple-800 dark:bg-purple-500/10 dark:text-purple-400 border-purple-200 dark:border-purple-500/20'; 
+            if (t.ticketType === 'Tickets de Requerimiento') typeStyle = 'bg-blue-100 text-blue-800 dark:bg-blue-500/10 dark:text-blue-400 border-blue-200 dark:border-blue-500/20'; 
+
+            let statusStyle = 'bg-amber-100 text-amber-800 dark:bg-amber-500/10 dark:text-amber-400 border-amber-200 dark:border-amber-500/20';
+            let statusText = 'Pendiente';
+            if (t.status === 'en_proceso') { statusStyle = 'bg-sky-100 text-sky-800 dark:bg-sky-500/10 dark:text-sky-400 border-sky-200 dark:border-sky-500/20'; statusText = 'En Proceso'; }
+            if (t.status === 'finalizado') { statusStyle = 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/20'; statusText = 'Finalizado'; }
+
+            const lat = t.coords?.lat || -12.0464;
+            const lng = t.coords?.lng || -77.0428;
+            const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+            const elapsed = getElapsedTime(t.requestDate || t.createdAt, t.status === 'finalizado' ? t.closureData?.closedAt : null);
+
+            return `
+                <tr class="hover:bg-slate-50 dark:hover:bg-[#030a05] transition-colors group cursor-pointer" onclick="openTicketDetailModal('${t.id}')">
+                    <td class="py-3 px-4" onclick="event.stopPropagation()">
+                        <div class="font-mono font-bold text-slate-900 dark:text-white">${t.id}</div>
+                        <div class="text-[10px] text-slate-500 mt-0.5">Req: ${formatCustomDate(t.requestDate || t.createdAt)}</div>
+                    </td>
+                    <td class="py-3 px-4" onclick="event.stopPropagation()">
+                        <span class="inline-block px-2 py-0.5 rounded border text-[10px] font-bold ${typeStyle}">${t.ticketType}</span>
+                        <div class="text-[10px] text-slate-500 mt-1">Cat: <b class="text-slate-700 dark:text-stone-300 uppercase">${t.category}</b></div>
+                    </td>
+                    <td class="py-3 px-4" onclick="event.stopPropagation()">
+                        <div class="font-bold text-slate-800 dark:text-stone-200">${t.elementType || 'Elemento'}</div>
+                        <div class="text-[10px] font-mono text-winet-600 mt-0.5">${t.elementCode || 'S/N'}</div>
+                    </td>
+                    <td class="py-3 px-4" onclick="event.stopPropagation()">
+                        <div class="flex items-center gap-1 font-bold text-rose-600 dark:text-rose-400"><i data-lucide="users" class="w-3 h-3"></i> ${t.affectedClients} Afectados</div>
+                        <div class="text-[10px] font-bold text-slate-700 dark:text-stone-300 mt-0.5 uppercase">Dist: ${t.distrito || 'N/A'}</div>
+                        <div class="text-[9px] text-slate-400">${t.nodo}</div>
+                    </td>
+                    <td class="py-3 px-4 font-mono" onclick="event.stopPropagation()">
+                        <a href="${googleMapsUrl}" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 font-bold" title="Google Maps">
+                            <i data-lucide="map-pin" class="w-3 h-3"></i> ${lat.toFixed(4)}, ${lng.toFixed(4)} ↗
+                        </a>
+                    </td>
+                    <td class="py-3 px-4" onclick="event.stopPropagation()">
+                        <div class="font-bold text-slate-800 dark:text-stone-200 flex items-center gap-1 mb-0.5"><i data-lucide="user" class="w-3 h-3 text-slate-400"></i> ${t.supervisor || 'Sin Sup.'}</div>
+                        <div class="text-[10px] font-bold text-winet-600 flex items-center gap-1 uppercase"><i data-lucide="briefcase" class="w-3 h-3"></i> ${t.contractor || 'Ninguna'}</div>
+                        <div class="text-[9px] text-slate-500">Brigada: ${t.brigada || 'N/A'}</div>
+                    </td>
+                    <td class="py-3 px-4" onclick="event.stopPropagation()">
+                        <div class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-50 text-amber-700 dark:bg-amber-500/10 border border-amber-200 font-mono font-bold text-[10px] mb-1">
+                            <i data-lucide="timer" class="w-3 h-3"></i> ${elapsed.text}
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="px-2 py-0.5 rounded border text-[9px] font-bold uppercase tracking-wider ${statusStyle}">${statusText}</span>
+                            <select onchange="updateTicketStatus('${t.id}', this.value)" class="text-[10px] font-bold bg-white dark:bg-[#020503] border border-slate-200 dark:border-[#122b1c] rounded px-1 py-0.5 text-slate-600 dark:text-stone-400 focus:outline-none">
+                                <option value="pendiente" ${t.status==='pendiente'?'selected':''}>Pend.</option>
+                                <option value="en_proceso" ${t.status==='en_proceso'?'selected':''}>Proceso</option>
+                                <option value="finalizado" ${t.status==='finalizado'?'selected':''}>Finalizado</option>
+                            </select>
+                        </div>
+                    </td>
+                    <td class="py-3 px-4 text-right" onclick="event.stopPropagation()">
+                        <div class="flex items-center justify-end gap-1">
+                            <button onclick="quickTelegramModal('${t.id}')" class="p-1 rounded hover:bg-slate-200 dark:hover:bg-[#122b1c] text-blue-600" title="Telegram"><i data-lucide="send" class="w-3.5 h-3.5"></i></button>
+                            <button onclick="openEditTicketModal('${t.id}')" class="p-1 rounded hover:bg-slate-200 dark:hover:bg-[#122b1c] text-slate-600 dark:text-stone-300" title="Editar"><i data-lucide="pencil" class="w-3.5 h-3.5"></i></button>
+                            ${t.status !== 'finalizado' ? `<button onclick="openClosureModal('\${t.id}')" class="p-1 rounded hover:bg-winet-100 text-winet-600" title="Cerrar"><i data-lucide="check-square" class="w-3.5 h-3.5"></i></button>` : `<button onclick="viewClosureDetails('\${t.id}')" class="p-1 rounded hover:bg-slate-200 text-slate-600" title="Ver Cierre"><i data-lucide="eye" class="w-3.5 h-3.5"></i></button>`}
+                            <button onclick="deleteTicketPrompt('${t.id}')" class="p-1 rounded hover:bg-rose-100 text-rose-600" title="Eliminar"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }
+
+        function openTicketDetailModal(id) {
+            const t = getTickets().find(x => x.id === id);
+            if (!t) return;
+            const lat = t.coords?.lat || -12.0464;
+            const lng = t.coords?.lng || -77.0428;
+            const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+
+            openModal(`
+                <div class="bg-white dark:bg-[#0a110c] rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 dark:border-[#122b1c] max-h-[90vh] flex flex-col">
+                    <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-100 dark:border-[#122b1c]">
+                        <h3 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">Detalle de Ticket • <span class="text-winet-600 font-mono">${t.id}</span></h3>
+                        <button onclick="closeModal()" class="text-slate-400 hover:text-slate-800"><i data-lucide="x" class="w-5 h-5"></i></button>
+                    </div>
+                    <div class="space-y-4 text-xs overflow-y-auto pr-2 flex-1">
+                        <div class="flex justify-between items-center bg-slate-50 dark:bg-[#020503] px-3 py-2 rounded-xl border border-slate-100 dark:border-[#122b1c]">
+                            <span class="font-bold text-slate-500 uppercase">Coordenadas GPS</span>
+                            <a href="${googleMapsUrl}" target="_blank" class="font-mono font-bold text-blue-600 hover:underline">${lat}, ${lng} ↗</a>
+                        </div>
+                        <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 bg-slate-50 dark:bg-[#020503] p-3 rounded-xl border border-slate-100 dark:border-[#122b1c]">
+                            <div><span class="text-[9px] font-bold text-slate-400 uppercase">Tipo</span><div class="font-bold mt-0.5">${t.ticketType}</div></div>
+                            <div><span class="text-[9px] font-bold text-slate-400 uppercase">Categoría</span><div class="font-bold mt-0.5 uppercase">${t.category}</div></div>
+                            <div><span class="text-[9px] font-bold text-slate-400 uppercase">Clientes</span><div class="font-bold text-rose-500 mt-0.5">${t.affectedClients} afectados</div></div>
+                            <div><span class="text-[9px] font-bold text-slate-400 uppercase">Contratista</span><div class="font-bold text-winet-600 mt-0.5">${t.contractor || 'N/A'}</div></div>
+                            <div><span class="text-[9px] font-bold text-slate-400 uppercase">Brigada</span><div class="font-bold mt-0.5">${t.brigada || 'N/A'}</div></div>
+                            <div><span class="text-[9px] font-bold text-slate-400 uppercase">Distrito</span><div class="font-bold mt-0.5">${t.distrito}</div></div>
+                            <div><span class="text-[9px] font-bold text-slate-400 uppercase">Nodo</span><div class="font-bold mt-0.5">${t.nodo}</div></div>
+                            <div><span class="text-[9px] font-bold text-slate-400 uppercase">Elemento</span><div class="font-bold mt-0.5">${t.elementType} (${t.elementCode})</div></div>
+                            <div><span class="text-[9px] font-bold text-slate-400 uppercase">Supervisor</span><div class="font-bold mt-0.5">${t.supervisor || 'N/A'}</div></div>
+                        </div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-400 uppercase block mb-1">Detalles / Rotulado</span>
+                            <div class="bg-slate-50 dark:bg-[#020503] p-3 rounded-xl border border-slate-100 dark:border-[#122b1c] font-mono whitespace-pre-line">${t.details || 'Sin detalles'}</div>
+                        </div>
+                    </div>
+                </div>
+            `);
+        }
+
+        function deleteTicketPrompt(id) {
+            openModal(`
+                <div class="bg-white dark:bg-[#0a110c] rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-[#122b1c] text-center">
+                    <div class="w-12 h-12 bg-rose-100 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-3"><i data-lucide="alert-triangle" class="w-6 h-6"></i></div>
+                    <h3 class="font-bold text-slate-800 dark:text-white mb-2">Eliminar Ticket</h3>
+                    <p class="text-xs text-slate-500 mb-5">¿Desea eliminar permanentemente el ticket <strong>${id}</strong>? Su ID numérico será reciclado.</p>
+                    <div class="flex justify-center gap-3">
+                        <button onclick="closeModal()" class="px-4 py-2 text-xs text-slate-600 font-bold rounded-xl bg-slate-100">Cancelar</button>
+                        <button onclick="confirmDeleteTicket('${id}')" class="px-4 py-2 text-xs bg-rose-600 text-white font-bold rounded-xl">Eliminar</button>
+                    </div>
+                </div>
+            `);
+        }
+
+        function confirmDeleteTicket(id) {
+            let tickets = getTickets();
+            const ticketToDelete = tickets.find(t => t.id === id);
+            if (ticketToDelete && ticketToDelete.id) {
+                const parts = ticketToDelete.id.split('-');
+                if (parts.length === 2) {
+                    const prefix = parts[0];
+                    const num = parseInt(parts[1], 10);
+                    if (!isNaN(num)) {
+                        const recycled = getRecycledIds();
+                        if (!recycled[prefix]) recycled[prefix] = [];
+                        if (!recycled[prefix].includes(num)) {
+                            recycled[prefix].push(num);
+                            saveRecycledIds(recycled);
+                        }
+                    }
+                }
+            }
+            tickets = tickets.filter(t => t.id !== id);
+            saveTickets(tickets);
+            logAudit('DELETE_TICKET', `Ticket ${id} eliminado y su ID reciclado`);
+            closeModal();
+            renderApp();
+            showToast(`Ticket ${id} eliminado. ID reciclado.`, 'success');
+        }
+
+        function openModal(htmlContent) {
+            document.getElementById('modal-container').innerHTML = `
+                <div class="fixed inset-0 z-[60] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">${htmlContent}</div>
+            `;
+            lucide.createIcons();
+        }
+        function closeModal() { document.getElementById('modal-container').innerHTML = ''; }
+
+        function renderNewTicketView() {
+            const catalogs = getCatalogs();
+            const supervisors = getUsers().filter(u => u.role !== 'noc' && u.role !== 'tecnico');
+            const initialId = generateNextTicketId('Avería Clientes Loss');
+            const nowIsoLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+
+            return `
+                <div class="max-w-4xl mx-auto space-y-6">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h2 class="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2"><i data-lucide="plus-circle" class="text-winet-500"></i> Registro de Nueva Avería</h2>
+                            <p class="text-xs text-slate-500 mt-0.5">Complete los datos de la incidencia para su despacho inmediato.</p>
+                        </div>
+                        <button onclick="switchView('dashboard')" class="px-4 py-2 bg-white dark:bg-[#0a110c] border border-slate-200 dark:border-[#122b1c] rounded-xl text-xs font-semibold shadow-sm">Volver</button>
+                    </div>
+
+                    <form onsubmit="handleCreateTicketSubmit(event)" class="bg-white dark:bg-[#0a110c] p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-[#122b1c] space-y-5">
+                        <div class="flex flex-wrap justify-between items-center gap-4 border-b border-slate-100 dark:border-[#122b1c] pb-4">
+                            <div>
+                                <span class="text-[10px] font-bold text-slate-500 uppercase">ID Autogenerado (Reciclable)</span>
+                                <div id="display-ticket-id" class="text-lg font-mono font-black text-winet-600">${initialId}</div>
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Fecha y Hora de Solicitud</label>
+                                <input type="datetime-local" id="reg-request-date" required value="${nowIsoLocal}" class="bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] rounded-xl px-3 py-2 text-xs font-mono text-slate-900 dark:text-white focus:outline-none">
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <div>
+                                <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Tipo de Avería</label>
+                                <select id="reg-ticket-type" onchange="updateTicketIdPrefix(this.value)" class="w-full bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none font-medium">
+                                    <option value="Avería Clientes Loss">Avería Clientes Loss</option>
+                                    <option value="Tickets de Backbone">Tickets de Backbone</option>
+                                    <option value="Tickets de Requerimiento">Tickets de Requerimiento</option>
+                                </select>
+                            </div>
+                            ${renderInputGroup('Categoría', 'reg-category', 'select', ['AVERIA', 'BACKBONE', 'REQUERIMIENTO'])}
+                            ${renderInputGroup('Área que Reporta', 'reg-report-area', 'select', ['Calidad Operativa', 'NOC', 'Campo'])}
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            ${renderInputGroup('Clientes Afectados', 'reg-clients', 'number', null, '', 'Ej. 3')}
+                            ${renderInputGroup('Tipo de Elemento', 'reg-eltype', 'text', null, '', 'Ej. Caja CTO')}
+                            ${renderInputGroup('Código de Elemento', 'reg-elcode', 'text', null, '', 'Ej. 20260928200')}
+                        </div>
+
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                            ${renderInputGroup('Nodo', 'reg-nodo', 'text', null, '', 'Ej. NODO HUARAL')}
+                            ${renderInputGroup('Proyecto', 'reg-project', 'text', null, '', 'Ej. HUARAL 2')}
+                            ${renderInputGroup('Distrito', 'reg-distrito', 'text', null, '', 'Ej. Huaral')}
+                            ${renderInputGroup('Zona', 'reg-zone', 'text', null, '', 'Ej. LIMA PROVINCIA')}
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 p-4 bg-slate-50 dark:bg-[#020503] rounded-xl border border-slate-100 dark:border-[#122b1c]">
+                            ${renderInputGroup('Supervisor Asignado', 'reg-supervisor', 'select', supervisors.map(s=>s.name), '', '', '', false)}
+                            ${renderInputGroup('Contratista', 'reg-contractor', 'select', catalogs.contractors, '', '', '', false)}
+                            ${renderInputGroup('Brigada', 'reg-brigada', 'text', null, '', 'Ej. Brigada 1', '', false)}
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4">
+                            ${renderInputGroup('Latitud GPS', 'reg-lat', 'number', null, '', 'Ej. -12.9897768', 'any')}
+                            ${renderInputGroup('Longitud GPS', 'reg-lng', 'number', null, '', 'Ej. -77.0909098', 'any')}
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 dark:text-stone-300 uppercase mb-1">Detalles Adicionales / Rotulado</label>
+                            <textarea id="reg-details" rows="3" required class="w-full bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] rounded-xl p-3 text-xs text-slate-900 dark:text-white focus:outline-none font-mono" placeholder="Describa los detalles o rotulado..."></textarea>
+                        </div>
+
+                        <div class="flex justify-end gap-3 pt-3 border-t border-slate-100 dark:border-[#122b1c]">
+                            <button type="submit" class="px-6 py-2.5 rounded-xl bg-winet-600 hover:bg-winet-700 text-white text-xs font-bold shadow-md flex items-center gap-1.5 transition-all">
+                                <i data-lucide="save" class="w-4 h-4"></i> Registrar Ticket en la Nube
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            `;
+        }
+
+        function updateTicketIdPrefix(ticketType) {
+            const displayEl = document.getElementById('display-ticket-id');
+            if(displayEl) displayEl.innerText = generateNextTicketId(ticketType);
+        }
+
+        function renderInputGroup(label, id, type, options = null, val = '', placeholder = '', step = '', required = true) {
+            const baseClass = "w-full bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none font-medium";
+            let inputHtml = '';
+            const reqAttr = required ? 'required' : '';
+            if (type === 'select' && options) {
+                let opts = options.map(o => `<option value="${o}">${o}</option>`).join('');
+                if (!required) opts = `<option value="">Seleccione... (Opcional)</option>` + opts;
+                inputHtml = `<select id="${id}" ${reqAttr} class="${baseClass}">${opts}</select>`;
+            } else {
+                inputHtml = `<input type="${type}" id="${id}" ${reqAttr} value="${val}" placeholder="${placeholder}" step="${step}" class="${baseClass}">`;
+            }
+            return `<div><label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">${label}</label>${inputHtml}</div>`;
+        }
+
+        function handleCreateTicketSubmit(e) {
+            e.preventDefault();
+            const tickets = getTickets();
+            const customId = document.getElementById('display-ticket-id').innerText;
+            const reqDateVal = document.getElementById('reg-request-date').value;
+
+            const newTicket = {
+                id: customId,
+                requestDate: reqDateVal ? new Date(reqDateVal).toISOString() : new Date().toISOString(),
+                createdAt: new Date().toISOString(),
+                ticketType: document.getElementById('reg-ticket-type').value,
+                category: document.getElementById('reg-category').value,
+                reportArea: document.getElementById('reg-report-area').value,
+                affectedClients: parseInt(document.getElementById('reg-clients').value) || 3,
+                elementType: document.getElementById('reg-eltype').value.trim(),
+                elementCode: document.getElementById('reg-elcode').value.trim(),
+                coords: { lat: parseFloat(document.getElementById('reg-lat').value) || -12.0464, lng: parseFloat(document.getElementById('reg-lng').value) || -77.0428 },
+                nodo: document.getElementById('reg-nodo').value.trim().toUpperCase(),
+                project: document.getElementById('reg-project').value.trim().toUpperCase(),
+                distrito: document.getElementById('reg-distrito').value.trim().toUpperCase(),
+                zone: document.getElementById('reg-zone').value.trim().toUpperCase(),
+                details: document.getElementById('reg-details').value.trim(),
+                status: 'pendiente',
+                supervisor: document.getElementById('reg-supervisor').value || null,
+                contractor: document.getElementById('reg-contractor').value || null,
+                brigada: document.getElementById('reg-brigada').value.trim(),
+                closureData: null
+            };
+            tickets.unshift(newTicket);
+            saveTickets(tickets);
+            logAudit('CREATE_TICKET', `Registro de nuevo ticket ${customId}`);
+            showToast(`Ticket ${customId} registrado correctamente.`, 'success');
+            switchView('dashboard');
+        }
+
+        function openEditTicketModal(ticketId) {
+            const ticket = getTickets().find(t => t.id === ticketId);
+            if (!ticket) return;
+            const supervisors = getUsers().filter(u => u.role !== 'noc' && u.role !== 'tecnico');
+            const catalogs = getCatalogs();
+
+            openModal(`
+                <div class="bg-white dark:bg-[#0a110c] rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 dark:border-[#122b1c] max-h-[90vh] overflow-y-auto">
+                    <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-100 dark:border-[#122b1c]">
+                        <h3 class="text-sm font-bold text-slate-800 dark:text-white">Editar Ticket • <span class="text-winet-600 font-mono">${ticket.id}</span></h3>
+                        <button onclick="closeModal()" class="text-slate-400"><i data-lucide="x" class="w-4 h-4"></i></button>
+                    </div>
+                    <form onsubmit="handleEditSubmit(event, '${ticket.id}')" class="space-y-3 text-xs">
+                        <div class="grid grid-cols-2 gap-3">
+                            ${renderInputGroup('Clientes', 'ed-clients', 'number', null, ticket.affectedClients)}
+                            ${renderInputGroup('Elemento', 'ed-eltype', 'text', null, ticket.elementType)}
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            ${renderInputGroup('Código', 'ed-elcode', 'text', null, ticket.elementCode)}
+                            ${renderInputGroup('Nodo', 'ed-nodo', 'text', null, ticket.nodo)}
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            ${renderInputGroup('Distrito', 'ed-distrito', 'text', null, ticket.distrito)}
+                            ${renderInputGroup('Brigada', 'ed-brigada', 'text', null, ticket.brigada)}
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            ${renderInputGroup('Supervisor', 'ed-sup', 'select', supervisors.map(s => s.name), '', '', '', false)}
+                            ${renderInputGroup('Contratista', 'ed-con', 'select', catalogs.contractors, '', '', '', false)}
+                        </div>
+                        <div class="flex justify-end gap-2 pt-3">
+                            <button type="button" onclick="closeModal()" class="px-4 py-2 text-slate-600 font-bold">Cancelar</button>
+                            <button type="submit" class="px-5 py-2 bg-winet-600 text-white font-bold rounded-xl">Guardar Cambios</button>
+                        </div>
+                    </form>
+                </div>
+            `);
+            setTimeout(() => {
+                if (document.getElementById('ed-sup')) document.getElementById('ed-sup').value = ticket.supervisor || '';
+                if (document.getElementById('ed-con')) document.getElementById('ed-con').value = ticket.contractor || '';
+            }, 50);
+        }
+
+        function handleEditSubmit(e, id) {
+            e.preventDefault();
+            const tickets = getTickets();
+            const t = tickets.find(x => x.id === id);
+            t.affectedClients = parseInt(document.getElementById('ed-clients').value) || 1;
+            t.elementType = document.getElementById('ed-eltype').value.trim();
+            t.elementCode = document.getElementById('ed-elcode').value.trim();
+            t.nodo = document.getElementById('ed-nodo').value.trim().toUpperCase();
+            t.distrito = document.getElementById('ed-distrito').value.trim().toUpperCase();
+            t.brigada = document.getElementById('ed-brigada').value.trim();
+            t.supervisor = document.getElementById('ed-sup').value || null;
+            t.contractor = document.getElementById('ed-con').value || null;
+            saveTickets(tickets);
+            logAudit('EDIT_TICKET', `Actualización de datos del ticket ${id}`);
+            showToast('Ticket actualizado con éxito', 'success');
+            closeModal();
+            renderApp();
+        }
+
+        function updateTicketStatus(id, stat) {
+            const tickets = getTickets();
+            const t = tickets.find(x => x.id === id);
+            t.status = stat;
+            saveTickets(tickets);
+            logAudit('STATUS_CHANGE', `Cambio de estatus del ticket ${id} a ${stat}`);
+            showToast('Estatus actualizado');
+            renderApp();
+        }
+
+        function quickTelegramModal(id) {
+            const t = getTickets().find(x => x.id === id);
+            const text = buildTelegramFormat(t);
+            openModal(`
+                <div class="bg-white dark:bg-[#0a110c] rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-[#122b1c]">
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="text-sm font-bold text-slate-800 dark:text-white flex items-center gap-1.5"><i data-lucide="send" class="w-4 h-4 text-blue-500"></i> Telegram • ${id}</h3>
+                        <button onclick="closeModal()" class="text-slate-400"><i data-lucide="x" class="w-4 h-4"></i></button>
+                    </div>
+                    <textarea id="qt-box" rows="12" readonly class="w-full bg-slate-50 dark:bg-[#020503] text-slate-700 dark:text-winet-400 border border-slate-200 dark:border-[#122b1c] rounded-xl p-3 font-mono text-xs focus:outline-none">${text}</textarea>
+                    <button onclick="document.getElementById('qt-box').select(); document.execCommand('copy'); showToast('Copiado'); closeModal();" class="w-full mt-3 py-2.5 bg-blue-600 text-white rounded-xl font-bold text-xs">Copiar al Portapapeles</button>
+                </div>
+            `);
+        }
+
+        function buildTelegramFormat(t) {
+            return `TICKET:  ${t.id}\nFECHA DE SOLICITUD:  ${formatCustomDate(t.requestDate || t.createdAt)}\nAREA QUE REPORTA:  ${(t.reportArea||'').toUpperCase()}\nMOTIVO:  ${(t.ticketType||'').toUpperCase()}\nCATEGORIA:  ${(t.category||'').toUpperCase()}\nCLIENTES AFECTADOS:  ${t.affectedClients}\nELEMENTO:  ${(t.elementType||'').toUpperCase()}\nCODIGO:  ${t.elementCode||''}\nCOORDENADAS:  ${t.coords.lat}, ${t.coords.lng}\nNODO:  ${t.nodo}\nPROYECTO:  ${t.project}\nDISTRITO:  ${t.distrito}\nZONA:  ${t.zone}\nDETALLES:  "${t.details}"\nSUPERVISOR:  ${t.supervisor}\nCONTRATISTA:  ${t.contractor}\nBRIGADA:  ${t.brigada}`;
+        }
+
+        function formatCustomDate(iso) {
+            if(!iso) return '';
+            const d = new Date(iso);
+            if(isNaN(d.getTime())) return iso;
+            return `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+        }
+
+        function renderTelegramSummaryView() {
+            const tickets = getTickets();
+            return `
+                <div class="max-w-4xl mx-auto space-y-6">
+                    <div class="flex justify-between items-center">
+                        <h2 class="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2"><i data-lucide="send" class="text-blue-500"></i> Reporte Rápido para Telegram</h2>
+                        <button onclick="switchView('dashboard')" class="px-4 py-2 bg-white dark:bg-[#0a110c] border border-slate-200 dark:border-[#122b1c] rounded-xl text-xs font-semibold shadow-sm">Volver</button>
+                    </div>
+                    <div class="bg-white dark:bg-[#0a110c] rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="space-y-3 max-h-[500px] overflow-y-auto pr-2">
+                            <h3 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Seleccione un Ticket</h3>
+                            ${tickets.map(t => `
+                                <div class="cursor-pointer p-3 rounded-xl border border-slate-200 dark:border-[#122b1c] hover:border-winet-500 transition-all bg-slate-50 dark:bg-[#020503]" onclick="document.getElementById('ts-preview').value = buildTelegramFormat(getTickets().find(x=>x.id==='\${t.id}'));">
+                                    <div class="font-bold text-slate-800 dark:text-white text-xs flex justify-between">
+                                        <span>\${t.id}</span>
+                                        <span class="text-[9px] px-2 py-0.5 rounded bg-winet-100 text-winet-700 dark:bg-winet-900/30">\${t.status}</span>
+                                    </div>
+                                    <div class="text-[10px] text-slate-500 mt-0.5">${t.nodo} •${t.ticketType}</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                        <div class="flex flex-col h-full">
+                            <h3 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2 flex justify-between items-center">
+                                <span>Vista Previa</span>
+                                <button onclick="const el = document.getElementById('ts-preview'); el.select(); document.execCommand('copy'); showToast('Copiado');" class="text-xs bg-blue-600 text-white px-3 py-1 rounded font-bold">Copiar</button>
+                            </h3>
+                            <textarea id="ts-preview" readonly placeholder="Seleccione un ticket a la izquierda..." class="flex-1 w-full min-h-[350px] bg-slate-50 dark:bg-[#020503] text-slate-700 dark:text-winet-400 border border-slate-200 dark:border-[#122b1c] rounded-xl p-3 font-mono text-xs focus:outline-none resize-none"></textarea>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderQueuesView() {
+            const tickets = getTickets();
+            const users = getUsers();
+            const supervisors = [...new Set([...users.filter(u => u.role !== 'noc' && u.role !== 'tecnico').map(u => u.name), ...tickets.map(t => t.supervisor).filter(Boolean)])].sort();
+            const columns = ['Sin Asignar', ...supervisors];
+
+            return `
+                <div class="h-[calc(100vh-130px)] flex flex-col space-y-4">
+                    <div class="flex justify-between items-center">
+                        <h2 class="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2"><i data-lucide="kanban" class="text-winet-500"></i> Tablero de Asignación por Supervisores</h2>
+                        <button onclick="switchView('dashboard')" class="px-4 py-2 bg-white dark:bg-[#0a110c] border border-slate-200 dark:border-[#122b1c] rounded-xl text-xs font-semibold shadow-sm">Volver</button>
+                    </div>
+                    <div class="flex-1 flex gap-4 overflow-x-auto pb-4">
+                        ${columns.map(sup => {
+                            const supTickets = tickets.filter(t => (sup === 'Sin Asignar' && !t.supervisor) || t.supervisor === sup);
+                            return `
+                                <div class="min-w-[360px] w-[380px] max-h-full flex flex-col bg-slate-50 dark:bg-[#050a07] rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm">
+                                    <div class="p-3.5 border-b border-slate-200 dark:border-[#122b1c] bg-white dark:bg-[#0a110c] rounded-t-2xl flex justify-between items-center">
+                                        <h3 class="font-bold text-slate-800 dark:text-white text-xs uppercase">\${sup}</h3>
+                                        <span class="bg-slate-200 dark:bg-[#122b1c] text-[10px] px-2 py-0.5 rounded-full font-bold">\${supTickets.length}</span>
+                                    </div>
+                                    <div class="flex-1 overflow-y-auto p-3 space-y-2.5">
+                                        \${supTickets.map(t => renderQueueCard(t, supervisors)).join('') || `<div class="text-center text-[11px] text-slate-400 py-6 border border-dashed border-slate-200 dark:border-[#122b1c] rounded-xl">Sin tickets</div>`}
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderQueueCard(t, supervisors) {
+            const elapsed = getElapsedTime(t.requestDate || t.createdAt);
+            return `
+                <div class="bg-white dark:bg-[#0a110c] p-3.5 rounded-xl border border-slate-200 dark:border-[#122b1c] shadow-sm space-y-2.5 cursor-pointer hover:border-winet-500 transition-all" onclick="openTicketDetailModal('${t.id}')">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <span class="font-mono font-bold text-slate-900 dark:text-white text-xs">${t.id}</span>
+                            <div class="text-[10px] text-slate-500">Req: ${formatCustomDate(t.requestDate || t.createdAt)}</div>
+                        </div>
+                        <span class="text-[9px] px-1.5 py-0.5 rounded border font-bold bg-winet-50 text-winet-700">${t.ticketType}</span>
+                    </div>
+                    <div class="grid grid-cols-2 gap-1.5 bg-slate-50 dark:bg-[#020503] p-2 rounded-lg text-[10px]">
+                        <div><span class="text-slate-400 uppercase">Clientes</span><div class="font-bold text-rose-500">${t.affectedClients}</div></div>
+                        <div><span class="text-slate-400 uppercase">Distrito</span><div class="font-bold uppercase">${t.distrito}</div></div>
+                        <div><span class="text-slate-400 uppercase">Contratista</span><div class="font-bold text-winet-600">${t.contractor || 'N/A'}</div></div>
+                        <div><span class="text-slate-400 uppercase">Brigada</span><div class="font-bold">${t.brigada || 'N/A'}</div></div>
+                    </div>
+                    <div class="flex items-center justify-between pt-1" onclick="event.stopPropagation()">
+                        <span class="font-mono text-[10px] text-amber-600">⏱ ${elapsed.text}</span>
+                        <select onchange="updateTicketSupervisor('${t.id}', this.value)" class="text-[10px] font-semibold bg-slate-50 dark:bg-[#020503] border border-slate-200 dark:border-[#122b1c] rounded p-1">
+                            <option value="">Sin Asignar</option>
+                            ${supervisors.map(s => `<option value="\${s}" ${t.supervisor === s ? 'selected' : ''}>${s}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div onclick="event.stopPropagation()">
+                        ${t.status !== 'finalizado' ? `<button onclick="openClosureModal('\${t.id}')" class="w-full py-1 bg-winet-600 text-white rounded-lg text-[10px] font-bold">Cerrar Ticket</button>` : `<button onclick="viewClosureDetails('\${t.id}')" class="w-full py-1 bg-slate-100 dark:bg-[#122b1c] text-[10px] font-bold">Ver Cierre</button>`}
+                    </div>
+                </div>
+            `;
+        }
+
+        function updateTicketSupervisor(id, sup) {
+            const tickets = getTickets();
+            const t = tickets.find(x => x.id === id);
+            t.supervisor = sup || null;
+            saveTickets(tickets);
+            logAudit('REASSIGN_SUPERVISOR', `Ticket ${id} reasignado a ${sup || 'Sin Asignar'}`);
+            showToast('Supervisor reasignado', 'success');
+            renderApp();
+        }
+
+        function openClosureModal(id) {
+            const catalogs = getCatalogs();
+            tempMaterials = [];
+            openModal(`
+                <div class="bg-white dark:bg-[#0a110c] rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-[#122b1c] max-h-[90vh] flex flex-col">
+                    <div class="flex justify-between items-center mb-4 pb-2 border-b border-slate-100 dark:border-[#122b1c]">
+                        <h3 class="text-sm font-bold text-slate-800 dark:text-white">Cerrar Avería • <span class="text-winet-600 font-mono">${id}</span></h3>
+                        <button onclick="closeModal()" class="text-slate-400"><i data-lucide="x" class="w-4 h-4"></i></button>
+                    </div>
+                    <form onsubmit="handleClosure(event, '${id}')" class="space-y-3 text-xs overflow-y-auto pr-1 flex-1">
+                        <div class="grid grid-cols-2 gap-3">
+                            ${renderInputGroup('Hora Inicio', 'cl-start', 'time')}
+                            ${renderInputGroup('Hora Fin', 'cl-end', 'time')}
+                        </div>
+                        ${renderInputGroup('Causa Raíz', 'cl-cause', 'select', catalogs.causes)}
+                        ${renderInputGroup('Solución Aplicada', 'cl-sol', 'select', catalogs.solutions)}
+                        
+                        <div class="p-3 bg-slate-50 dark:bg-[#020503] rounded-xl border border-slate-200 dark:border-[#122b1c] space-y-2">
+                            <label class="block font-bold text-slate-700 dark:text-stone-300 uppercase text-[10px]">Materiales Utilizados</label>
+                            <div class="flex gap-2">
+                                <select id="mat-select" class="flex-1 bg-white dark:bg-[#0a110c] border border-slate-300 dark:border-[#122b1c] rounded-lg px-2.5 py-1.5 text-xs text-slate-900 dark:text-white focus:outline-none">
+                                    <option value="">Seleccione Material...</option>
+                                    ${catalogs.materials.map(m => `<option value="\${m.name}">${m.name} (${m.unit})</option>`).join('')}
+                                </select>
+                                <input type="number" id="mat-qty" placeholder="Cant." min="1" class="w-16 bg-white dark:bg-[#0a110c] border border-slate-300 dark:border-[#122b1c] rounded-lg px-2.5 py-1.5 text-xs text-slate-900 dark:text-white focus:outline-none">
+                                <button type="button" onclick="addClosureMaterial()" class="px-3 py-1.5 bg-slate-200 dark:bg-[#122b1c] text-slate-800 dark:text-white rounded-lg font-bold">+</button>
+                            </div>
+                            <div id="closure-materials-list" class="space-y-1.5 mt-2 max-h-[120px] overflow-y-auto">
+                                <p class="text-[10px] text-slate-500 italic">No hay materiales agregados.</p>
+                            </div>
+                        </div>
+
+                        <div class="pt-2">
+                            <button type="button" onclick="toggleGisClosureSection()" id="btn-toggle-gis" class="w-full py-1.5 bg-slate-100 dark:bg-[#122b1c] text-slate-700 dark:text-winet-400 rounded-xl font-bold text-[11px] flex items-center justify-center gap-1 border border-dashed border-slate-300">
+                                <i data-lucide="map-pin" class="w-3.5 h-3.5"></i> + Añadir Reporte GIS Catastro
+                            </button>
+                            <div id="gis-closure-section" class="hidden mt-2 p-3 bg-slate-50 dark:bg-[#020503] rounded-xl border border-slate-200 dark:border-[#122b1c] space-y-2.5">
+                                <div class="font-bold text-winet-600 text-[10px]">Reporte GIS Catastros</div>
+                                ${renderInputGroup('Estado Actualización', 'cl-gis-status', 'select', ['Actualizado', 'Pendiente', 'Requiere Visita'], '', '', '', false)}
+                                ${renderInputGroup('Ruta KMZ', 'cl-gis-kmz', 'text', null, '', 'Ej. https://gis.winet.pe/...', '', false)}
+                            </div>
+                        </div>
+
+                        <div class="pt-3 border-t border-slate-100 dark:border-[#122b1c] flex justify-end gap-2">
+                            <button type="button" onclick="closeModal()" class="px-4 py-2 text-slate-600 font-bold">Cancelar</button>
+                            <button type="submit" class="px-5 py-2 bg-winet-600 text-white font-bold rounded-xl flex items-center gap-1.5 shadow-md">
+                                <i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i> Finalizar Ticket
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            `);
+        }
+
+        function toggleGisClosureSection() {
+            const section = document.getElementById('gis-closure-section');
+            const btn = document.getElementById('btn-toggle-gis');
+            if(section.classList.contains('hidden')) {
+                section.classList.remove('hidden');
+                btn.innerHTML = `<i data-lucide="minus-circle" class="w-3.5 h-3.5"></i> Ocultar GIS Catastro`;
+                btn.className = "w-full py-1.5 bg-rose-50 text-rose-600 rounded-xl font-bold text-[11px] flex items-center justify-center gap-1 border border-dashed border-rose-300";
+            } else {
+                section.classList.add('hidden');
+                btn.innerHTML = `<i data-lucide="map-pin" class="w-3.5 h-3.5"></i> + Añadir Reporte GIS Catastro`;
+                btn.className = "w-full py-1.5 bg-slate-100 dark:bg-[#122b1c] text-slate-700 dark:text-winet-400 rounded-xl font-bold text-[11px] flex items-center justify-center gap-1 border border-dashed border-slate-300";
+            }
+            lucide.createIcons();
+        }
+
+        function addClosureMaterial() {
+            const select = document.getElementById('mat-select');
+            const qtyInput = document.getElementById('mat-qty');
+            const name = select.value;
+            const qty = parseInt(qtyInput.value);
+            if (!name || isNaN(qty) || qty <= 0) return showToast('Seleccione material y cantidad', 'error');
+            const existingIdx = tempMaterials.findIndex(m => m.name === name);
+            if (existingIdx > -1) tempMaterials[existingIdx].qty += qty;
+            else tempMaterials.push({ name, qty });
+            select.value = '';
+            qtyInput.value = '';
+            renderClosureMaterialsList();
+        }
+
+        function removeClosureMaterial(idx) {
+            tempMaterials.splice(idx, 1);
+            renderClosureMaterialsList();
+        }
+
+        function renderClosureMaterialsList() {
+            const listEl = document.getElementById('closure-materials-list');
+            if (tempMaterials.length === 0) {
+                listEl.innerHTML = '<p class="text-[10px] text-slate-500 italic">No hay materiales agregados.</p>';
+                return;
+            }
+            listEl.innerHTML = tempMaterials.map((m, idx) => `
+                <div class="flex items-center justify-between bg-white dark:bg-[#0a110c] p-2 rounded border border-slate-200 dark:border-[#122b1c] text-xs">
+                    <span><strong>${m.qty}x</strong> ${m.name}</span>
+                    <button type="button" onclick="removeClosureMaterial(${idx})" class="text-rose-500 p-0.5"><i data-lucide="trash-2" class="w-3 h-3"></i></button>
+                </div>
+            `).join('');
+            lucide.createIcons();
+        }
+
+        function handleClosure(e, id) {
+            e.preventDefault();
+            const tickets = getTickets();
+            const t = tickets.find(x => x.id === id);
+            t.status = 'finalizado';
+            const safeRead = (elemId) => { const el = document.getElementById(elemId); return el ? el.value : ''; };
+            const isGisShown = document.getElementById('gis-closure-section') && !document.getElementById('gis-closure-section').classList.contains('hidden');
+
+            t.closureData = {
+                startTime: safeRead('cl-start') || '08:00',
+                endTime: safeRead('cl-end') || '10:00',
+                cause: safeRead('cl-cause') || 'Sin Causa',
+                solution: safeRead('cl-sol') || 'Sin Solución',
+                materials: [...tempMaterials],
+                gisCatastro: isGisShown ? { status: safeRead('cl-gis-status'), kmz: safeRead('cl-gis-kmz') } : null,
+                closedAt: new Date().toISOString()
+            };
+            saveTickets(tickets);
+            logAudit('CLOSE_TICKET', `Cierre exitoso del ticket ${id}`);
+            showToast(`Ticket ${id} cerrado correctamente.`, 'success');
+            closeModal();
+            renderApp();
+        }
+
+        function viewClosureDetails(id) {
+            const t = getTickets().find(x => x.id === id);
+            if(!t || !t.closureData) return;
+            openModal(`
+                <div class="bg-white dark:bg-[#0a110c] rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-[#122b1c]">
+                    <div class="flex justify-between items-center mb-4 pb-2 border-b border-slate-100 dark:border-[#122b1c]">
+                        <h3 class="font-bold text-slate-800 dark:text-white text-sm flex items-center gap-1.5"><i data-lucide="file-check" class="text-winet-500 w-4 h-4"></i> Detalles de Cierre</h3>
+                        <button onclick="closeModal()" class="text-slate-400"><i data-lucide="x" class="w-4 h-4"></i></button>
+                    </div>
+                    <div class="space-y-3 text-xs text-slate-700 dark:text-stone-300 max-h-[60vh] overflow-y-auto pr-1">
+                        <div class="grid grid-cols-2 gap-3">
+                            <div><span class="text-[9px] font-bold text-slate-500 uppercase block">Inicio</span> <span class="font-mono font-bold">${t.closureData.startTime}</span></div>
+                            <div><span class="text-[9px] font-bold text-slate-500 uppercase block">Fin</span> <span class="font-mono font-bold">${t.closureData.endTime}</span></div>
+                        </div>
+                        <div><span class="text-[9px] font-bold text-slate-500 uppercase block mb-0.5">Causa Raíz</span><div class="bg-slate-50 dark:bg-[#020503] p-2 rounded">${t.closureData.cause}</div></div>
+                        <div><span class="text-[9px] font-bold text-slate-500 uppercase block mb-0.5">Solución Aplicada</span><div class="bg-slate-50 dark:bg-[#020503] p-2 rounded">${t.closureData.solution}</div></div>
+                        ${t.closureData.materials && t.closureData.materials.length > 0 ? `
+                        <div><span class="text-[9px] font-bold text-slate-500 uppercase block mb-0.5">Materiales</span>
+                        <div class="bg-slate-50 dark:bg-[#020503] p-2 rounded space-y-1">
+                            \${t.closureData.materials.map(m => `<div class="flex justify-between"><span><strong>${m.qty}x</strong></span> <span>${m.name}</span></div>`).join('')}
+                        </div></div>` : ''}
+                    </div>
+                </div>
+            `);
+        }
+
+        function renderAnalyticsView() {
+            const tickets = getTickets();
+            const total = tickets.length;
+            const finalized = tickets.filter(t => t.status === 'finalizado').length;
+            const clientsAffected = tickets.reduce((acc, t) => acc + (parseInt(t.affectedClients) || 0), 0);
+            return `
+                <div class="space-y-6">
+                    <div class="flex justify-between items-center bg-white dark:bg-[#0a110c] p-5 rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm">
+                        <h2 class="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2"><i data-lucide="bar-chart-2" class="text-winet-500"></i> Analítica y Métricas Cloud</h2>
+                        <button onclick="exportToCSV()" class="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-sm">Exportar Reporte</button>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        ${renderKpiCard('Total Tickets', total, 'ticket', 'text-blue-500', 'bg-blue-50 text-blue-600 dark:bg-blue-500/10')}
+                        ${renderKpiCard('Finalizados', finalized, 'check-circle-2', 'text-winet-500', 'bg-winet-50 text-winet-600 dark:bg-winet-500/10')}
+                        ${renderKpiCard('SLA Promedio WIN', '14:31 h', 'clock', 'text-purple-500', 'bg-purple-50 text-purple-600 dark:bg-purple-500/10')}
+                        ${renderKpiCard('Clientes Afectados', clientsAffected.toLocaleString(), 'users', 'text-amber-500', 'bg-amber-50 text-amber-600 dark:bg-amber-500/10')}
+                    </div>
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div class="lg:col-span-2 bg-white dark:bg-[#0a110c] p-6 rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm h-[320px]"><canvas id="chart-timeline"></canvas></div>
+                        <div class="bg-white dark:bg-[#0a110c] p-6 rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm h-[320px] flex justify-center"><canvas id="chart-category"></canvas></div>
+                    </div>
+                </div>
+            `;
+        }
+
+        let analyticsCharts = [];
+        function initAnalyticsCharts() {
+            analyticsCharts.forEach(c => c.destroy());
+            analyticsCharts = [];
+            const tickets = getTickets();
+            const catMap = {};
+            tickets.forEach(t => catMap[t.category] = (catMap[t.category]||0) + 1);
+            const ctxCat = document.getElementById('chart-category')?.getContext('2d');
+            if(ctxCat) analyticsCharts.push(new Chart(ctxCat, {
+                type: 'doughnut',
+                data: { labels: Object.keys(catMap), datasets: [{ data: Object.values(catMap), backgroundColor: ['#16a34a', '#3b82f6', '#f59e0b', '#f43f5e'] }] },
+                options: { responsive: true, maintainAspectRatio: false }
+            }));
+            const ctxTime = document.getElementById('chart-timeline')?.getContext('2d');
+            if(ctxTime) analyticsCharts.push(new Chart(ctxTime, {
+                type: 'bar',
+                data: { labels: ['Lima Sur', 'Lima Norte', 'Lima Provincia'], datasets: [{ label: 'Tickets por Zona', data: [18, 12, 5], backgroundColor: '#16a34a' }] },
+                options: { responsive: true, maintainAspectRatio: false }
+            }));
+        }
+
+        function renderLiquidationView() {
+            const tickets = getTickets().filter(t => t.status === 'finalizado' && t.closureData?.materials?.length > 0);
+            const catalogs = getCatalogs();
+            const materialSummary = {};
+            tickets.forEach(t => {
+                t.closureData.materials.forEach(m => {
+                    materialSummary[m.name] = (materialSummary[m.name] || 0) + parseInt(m.qty);
+                });
+            });
+
+            return `
+                <div class="max-w-5xl mx-auto space-y-6">
+                    <div class="flex justify-between items-center bg-white dark:bg-[#0a110c] p-5 rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm">
+                        <div>
+                            <h2 class="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2"><i data-lucide="calculator" class="text-winet-500"></i> Liquidación de Materiales</h2>
+                            <p class="text-xs text-slate-500 mt-0.5">Consolidado para facturación de contratistas.</p>
+                        </div>
+                        <button onclick="window.print()" class="px-4 py-2 bg-winet-600 text-white rounded-xl text-xs font-bold shadow-sm flex items-center gap-1.5"><i data-lucide="printer" class="w-4 h-4"></i> Imprimir Acta</button>
+                    </div>
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div class="bg-white dark:bg-[#0a110c] rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm overflow-hidden h-fit">
+                            <div class="p-4 border-b border-slate-200 dark:border-[#122b1c] bg-slate-50 dark:bg-[#030905]">
+                                <h3 class="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-white">Consolidado Total</h3>
+                            </div>
+                            <table class="w-full text-left border-collapse text-xs">
+                                <thead class="bg-slate-50 dark:bg-[#020503] text-slate-500">
+                                    <tr><th class="p-3">Material</th><th class="p-3 text-right">Cant.</th></tr>
+                                </thead>
+                                <tbody>
+                                    ${Object.entries(materialSummary).map(([mat, qty]) => `
+                                        <tr class="border-b border-slate-100 dark:border-[#122b1c]">
+                                            <td class="p-3 text-slate-700 dark:text-stone-300">\${mat}</td>
+                                            <td class="p-3 text-right font-black text-winet-600">\${qty}</td>
+                                        </tr>
+                                    `).join('') || `<tr><td colspan="2" class="p-6 text-center text-slate-400">Sin datos.</td></tr>`}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="lg:col-span-2 bg-white dark:bg-[#0a110c] rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm overflow-hidden">
+                            <div class="p-4 border-b border-slate-200 dark:border-[#122b1c] bg-slate-50 dark:bg-[#030905]">
+                                <h3 class="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-white">Detalle por Ticket Finalizado</h3>
+                            </div>
+                            <div class="overflow-x-auto max-h-[450px]">
+                                <table class="w-full text-left border-collapse text-xs">
+                                    <thead class="bg-slate-50 dark:bg-[#020503] text-slate-500 sticky top-0">
+                                        <tr><th class="p-3">Cierre</th><th class="p-3">Ticket</th><th class="p-3">Contratista</th><th class="p-3">Material</th><th class="p-3 text-center">Cant</th></tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-100 dark:divide-[#122b1c]">
+                                        ${tickets.flatMap(t => t.closureData.materials.map(m => `
+                                            <tr>
+                                                <td class="p-3 text-slate-500">\${formatCustomDate(t.closureData.closedAt)}</td>
+                                                <td class="p-3 font-mono font-bold text-slate-900 dark:text-white">\${t.id}</td>
+                                                <td class="p-3">\${t.contractor || 'Interno'}</td>
+                                                <td class="p-3">\${m.name}</td>
+                                                <td class="p-3 text-center font-bold text-winet-600">\${m.qty}</td>
+                                            </tr>
+                                        `)).join('') || `<tr><td colspan="5" class="p-8 text-center text-slate-400">Sin registros de cierre.</td></tr>`}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderManualView() {
+            return `
+                <div class="max-w-4xl mx-auto space-y-6">
+                    <div class="flex justify-between items-center bg-white dark:bg-[#0a110c] p-5 rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm">
+                        <h2 class="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2"><i data-lucide="book-open" class="text-winet-500"></i> Manual de Usuario y Operación</h2>
+                        <button onclick="switchView('dashboard')" class="px-4 py-2 bg-white dark:bg-[#0a110c] border border-slate-200 dark:border-[#122b1c] rounded-xl text-xs font-semibold shadow-sm">Volver</button>
+                    </div>
+                    <div class="bg-white dark:bg-[#0a110c] p-8 rounded-3xl border border-slate-200 dark:border-[#122b1c] shadow-sm space-y-6 text-xs leading-relaxed text-slate-700 dark:text-stone-300">
+                        <section class="space-y-2">
+                            <h3 class="font-bold text-sm text-winet-600 uppercase">1. Introducción y Acceso Cloud</h3>
+                            <p>El Sistema WINET PEXT Cloud Edition está diseñado para gestionar el ciclo de vida de las averías en planta externa con soporte multiusuario, roles de seguridad y sincronización en tiempo real. Ingrese con sus credenciales institucionales asignadas.</p>
+                        </section>
+                        <section class="space-y-2">
+                            <h3 class="font-bold text-sm text-winet-600 uppercase">2. Registro y Ciclo de Vida del Ticket</h3>
+                            <p>Desde la sección <strong>Registrar</strong>, complete los datos técnicos requeridos. El sistema autogenerará un código inteligente y permitirá reciclar IDs de tickets eliminados. Utilice el tablero de <strong>Asignación</strong> para supervisar cargas por cuadrilla.</p>
+                        </section>
+                        <section class="space-y-2">
+                            <h3 class="font-bold text-sm text-winet-600 uppercase">3. Cierre Operativo en Campo</h3>
+                            <p>Los técnicos de campo pueden cerrar averías especificando hora de inicio/fin, causa raíz, solución y los materiales empleados. Esto alimenta automáticamente el módulo de <strong>Liquidación</strong> y las métricas de SLA.</p>
+                        </section>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderDbManagerView() {
+            const catalogs = getCatalogs();
+            const users = getUsers();
+            return `
+                <div class="max-w-5xl mx-auto space-y-6">
+                    <div class="flex justify-between items-center bg-white dark:bg-[#0a110c] p-5 rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm">
+                        <h2 class="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2"><i data-lucide="database" class="text-winet-500"></i> Gestión de Catálogos & Usuarios</h2>
+                        <button onclick="switchView('dashboard')" class="px-4 py-2 bg-white dark:bg-[#0a110c] border border-slate-200 dark:border-[#122b1c] rounded-xl text-xs font-semibold shadow-sm">Volver</button>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="bg-white dark:bg-[#0a110c] p-6 rounded-3xl border border-slate-200 dark:border-[#122b1c] shadow-sm space-y-4">
+                            <h3 class="font-bold text-xs uppercase text-slate-800 dark:text-white flex justify-between items-center">
+                                <span>Contratistas Autorizados</span>
+                                <button onclick="addCatalogItem('contractors')" class="px-2.5 py-1 bg-winet-600 text-white rounded text-[10px]">+ Añadir</button>
+                            </h3>
+                            <div class="space-y-2 max-h-[250px] overflow-y-auto">
+                                ${catalogs.contractors.map((c, idx) => `
+                                    <div class="flex justify-between items-center p-2.5 bg-slate-50 dark:bg-[#020503] rounded-xl border border-slate-100 dark:border-[#122b1c] text-xs">
+                                        <span>\${c}</span>
+                                        <button onclick="removeCatalogItem('contractors', \${idx})" class="text-rose-500"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                        <div class="bg-white dark:bg-[#0a110c] p-6 rounded-3xl border border-slate-200 dark:border-[#122b1c] shadow-sm space-y-4">
+                            <h3 class="font-bold text-xs uppercase text-slate-800 dark:text-white flex justify-between items-center">
+                                <span>Usuarios del Sistema (${users.length})</span>
+                                <button onclick="openUserModal()" class="px-2.5 py-1 bg-winet-600 text-white rounded text-[10px]">+ Usuario</button>
+                            </h3>
+                            <div class="space-y-2 max-h-[250px] overflow-y-auto">
+                                ${users.map(u => `
+                                    <div class="flex justify-between items-center p-2.5 bg-slate-50 dark:bg-[#020503] rounded-xl border border-slate-100 dark:border-[#122b1c] text-xs">
+                                        <div><div class="font-bold">\${u.name}</div><div class="text-[10px] text-slate-400">\${u.email} • <span class="uppercase">\${u.role}</span></div></div>
+                                        <button onclick="deleteUser('\${u.id}')" class="text-rose-500"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function addCatalogItem(key) {
+            openModal(`
+                <div class="bg-white dark:bg-[#0a110c] rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-[#122b1c]">
+                    <h3 class="font-bold text-slate-800 dark:text-white text-xs mb-3">Añadir Contratista</h3>
+                    <input type="text" id="new-cat-val" required placeholder="Nombre..." class="w-full bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none mb-4">
+                    <div class="flex justify-end gap-2">
+                        <button onclick="closeModal()" class="px-3 py-1.5 text-xs text-slate-600 font-bold">Cancelar</button>
+                        <button onclick="saveNewCatalogItem('${key}')" class="px-4 py-1.5 text-xs bg-winet-600 text-white font-bold rounded-xl">Guardar</button>
+                    </div>
+                </div>
+            `);
+        }
+
+        function saveNewCatalogItem(key) {
+            const val = document.getElementById('new-cat-val').value.trim();
+            if(!val) return;
+            const catalogs = getCatalogs();
+            catalogs[key].push(val);
+            saveCatalogs(catalogs);
+            logAudit('ADD_CATALOG', `Añadido valor a catálogo ${key}: ${val}`);
+            closeModal();
+            renderApp();
+            showToast('Añadido con éxito', 'success');
+        }
+
+        function removeCatalogItem(key, idx) {
+            const catalogs = getCatalogs();
+            catalogs[key].splice(idx, 1);
+            saveCatalogs(catalogs);
+            logAudit('REMOVE_CATALOG', `Eliminado elemento de catálogo ${key}`);
+            renderApp();
+            showToast('Eliminado', 'success');
+        }
+
+        function openUserModal() {
+            openModal(`
+                <div class="bg-white dark:bg-[#0a110c] rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-[#122b1c]">
+                    <div class="flex justify-between items-center mb-4 pb-2 border-b border-slate-100 dark:border-[#122b1c]">
+                        <h3 class="font-bold text-slate-800 dark:text-white text-xs">Nuevo Usuario</h3>
+                        <button onclick="closeModal()" class="text-slate-400"><i data-lucide="x" class="w-4 h-4"></i></button>
+                    </div>
+                    <form onsubmit="saveNewUser(event)" class="space-y-3 text-xs">
+                        <div><label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Nombre Completo</label><input type="text" id="u-name" required class="w-full bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none"></div>
+                        <div><label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Correo Electrónico</label><input type="email" id="u-email" required class="w-full bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none"></div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div><label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Contraseña</label><input type="text" id="u-pass" required value="winet2026" class="w-full bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none font-mono"></div>
+                            <div><label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Rol</label>
+                                <select id="u-role" class="w-full bg-slate-50 dark:bg-[#020503] border border-slate-300 dark:border-[#122b1c] rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none">
+                                    <option value="supervisor">Supervisor</option>
+                                    <option value="noc">NOC</option>
+                                    <option value="tecnico">Técnico Campo</option>
+                                    <option value="admin">Admin</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="flex justify-end gap-2 pt-2">
+                            <button type="button" onclick="closeModal()" class="px-4 py-2 text-slate-600 font-bold">Cancelar</button>
+                            <button type="submit" class="px-5 py-2 bg-winet-600 text-white font-bold rounded-xl">Crear Usuario</button>
+                        </div>
+                    </form>
+                </div>
+            `);
+        }
+
+        function saveNewUser(e) {
+            e.preventDefault();
+            const users = getUsers();
+            const newUser = {
+                id: `u_${Date.now()}`,
+                name: document.getElementById('u-name').value.trim(),
+                email: document.getElementById('u-email').value.trim(),
+                pass: document.getElementById('u-pass').value.trim(),
+                role: document.getElementById('u-role').value,
+                docId: '40000000',
+                phone: '+51 900000000',
+                avatar: 'https://placehold.co/150x150/16a34a/ffffff?text=U'
+            };
+            users.push(newUser);
+            saveUsers(users);
+            logAudit('CREATE_USER', `Creado usuario ${newUser.email}`);
+            closeModal();
+            renderApp();
+            showToast('Usuario creado con éxito', 'success');
+        }
+
+        function deleteUser(id) {
+            saveUsers(getUsers().filter(u => u.id !== id));
+            logAudit('DELETE_USER', `Eliminado usuario ID ${id}`);
+            renderApp();
+            showToast('Usuario eliminado', 'success');
+        }
+
+        function renderAuditView() {
+            const logs = getAuditLogs();
+            return `
+                <div class="max-w-4xl mx-auto space-y-6">
+                    <div class="flex justify-between items-center bg-white dark:bg-[#0a110c] p-5 rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm">
+                        <h2 class="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2"><i data-lucide="shield-alert" class="text-winet-500"></i> Registro de Auditoría del Sistema</h2>
+                        <button onclick="switchView('dashboard')" class="px-4 py-2 bg-white dark:bg-[#0a110c] border border-slate-200 dark:border-[#122b1c] rounded-xl text-xs font-semibold shadow-sm">Volver</button>
+                    </div>
+                    <div class="bg-white dark:bg-[#0a110c] rounded-2xl border border-slate-200 dark:border-[#122b1c] shadow-sm overflow-hidden p-6">
+                        <div class="space-y-2 max-h-[500px] overflow-y-auto">
+                            ${logs.map(l => `
+                                <div class="flex justify-between items-center p-3 rounded-xl bg-slate-50 dark:bg-[#020503] border border-slate-100 dark:border-[#122b1c] text-xs font-mono">
+                                    <div>
+                                        <span class="font-bold text-winet-600 dark:text-winet-400">[\${l.action}]</span> 
+                                        <span class="text-slate-700 dark:text-stone-300 ml-2">\${l.details}</span>
+                                        <div class="text-[10px] text-slate-400 mt-0.5">Usuario: \${l.user}</div>
+                                    </div>
+                                    <span class="text-[10px] text-slate-400">\${formatCustomDate(l.time)}</span>
+                                </div>
+                            `).join('') || '<p class="text-xs text-slate-400 text-center py-8">No hay registros de auditoría aún.</p>'}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function exportToCSV() {
+            const tickets = getTickets();
+            if(tickets.length === 0) return showToast('No hay datos', 'error');
+            const headers = ['ID Ticket', 'Fecha Solicitud', 'Estado', 'Clientes', 'Nodo', 'Distrito', 'Supervisor', 'Contratista'];
+            const rows = tickets.map(t => [t.id, t.requestDate || '', t.status, t.affectedClients, t.nodo, t.distrito, t.supervisor || '', t.contractor || '']);
+            const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows.map(e => e.map(String).map(s=>`"${s.regexReplace ? s : s.replace(/"/g, '""')}"`).join(','))].join('\n');
+            const link = document.createElement("a");
+            link.setAttribute("href", encodeURI(csvContent));
+            link.setAttribute("download", `WINET_PEXT_CLOUD_${new Date().toISOString().split('T')[0]}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            logAudit('EXPORT_CSV', 'Exportación de base de tickets a CSV');
+            showToast('CSV Descargado', 'success');
+        }
+
+        window.onload = function() { renderApp(); };
+    </script>
+</body>
+</html>
